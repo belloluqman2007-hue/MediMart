@@ -9,6 +9,19 @@ import { Dashboard } from './features/Dashboard';
 import { AuthPage } from './features/AuthPage';
 import { PlaceholderPage } from './features/PlaceholderPage';
 import { SettingsPage } from './features/SettingsPage';
+import { InventoryLayout } from './features/inventory/InventoryLayout';
+import { InventoryDashboard } from './features/inventory/InventoryDashboard';
+import { ProductsPage } from './features/inventory/ProductsPage';
+import { ProductFormPage } from './features/inventory/ProductFormPage';
+import { ProductDetailPage } from './features/inventory/ProductDetailPage';
+import { CategoriesPage } from './features/inventory/CategoriesPage';
+import { BatchesPage } from './features/inventory/BatchesPage';
+import { StockReceivePage } from './features/inventory/StockReceivePage';
+import { AdjustmentsPage } from './features/inventory/AdjustmentsPage';
+import { MovementsPage } from './features/inventory/MovementsPage';
+import { UnitsPage } from './features/inventory/UnitsPage';
+import { SuppliersPage } from './features/inventory/SuppliersPage';
+import { ReconciliationPage } from './features/inventory/ReconciliationPage';
 import { navigation } from './lib/navigation';
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -71,8 +84,26 @@ export function App({ runtime }: { runtime: Runtime }) {
             <Route element={<AppShell />}>
               <Route index element={<Dashboard />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="inventory" element={<InventoryLayout />}>
+                <Route index element={<InventoryDashboard />} />
+                <Route path="products" element={<ProductsPage />} />
+                <Route path="products/new" element={<ProductFormPage />} />
+                <Route path="products/:id" element={<ProductDetailPage />} />
+                <Route path="products/:id/edit" element={<ProductFormPage />} />
+                <Route path="categories" element={<CategoriesPage />} />
+                <Route path="batches" element={<BatchesPage />} />
+                <Route path="receive" element={<StockReceivePage />} />
+                <Route path="adjustments" element={<AdjustmentsPage />} />
+                <Route path="movements" element={<MovementsPage />} />
+                <Route path="units" element={<UnitsPage />} />
+                <Route path="suppliers" element={<SuppliersPage />} />
+                <Route path="reconciliation" element={<ReconciliationPage />} />
+              </Route>
+              <Route path="suppliers" element={<SuppliersPage />} />
               {navigation
-                .filter((item) => !['/', '/settings'].includes(item.path))
+                .filter(
+                  (item) => !['/', '/settings', '/inventory', '/suppliers'].includes(item.path),
+                )
                 .map((item) => (
                   <Route
                     key={item.path}

@@ -103,7 +103,10 @@ describe('native storage adapter contract (mock bridge, not an Android device)',
     expect(bridge.createOptions).toEqual(['medimart', true, 'secret', 1, false]);
     expect(bridge.secret).toMatch(/^[a-f0-9]{64}$/);
     expect(runtime.deviceId).toMatch(/^[a-f0-9-]{36}$/);
-    expect(await runtime.database!.all('SELECT * FROM database_migrations')).toHaveLength(3);
+    const { migrations } = await import('@medimart/database');
+    expect(await runtime.database!.all('SELECT * FROM database_migrations')).toHaveLength(
+      migrations.length,
+    );
     expect(
       await runtime.database!.all('SELECT * FROM devices WHERE id=?', [runtime.deviceId!]),
     ).toHaveLength(1);

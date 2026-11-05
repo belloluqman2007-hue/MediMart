@@ -24,6 +24,7 @@ import { AuthService, requireActiveContext } from './services/auth';
 import { DeviceService } from './services/devices';
 import { csrfForToken } from './services/crypto';
 import { audit } from './services/audit';
+import { registerInventoryRoutes } from './routes/inventory';
 const meta = (req: Request) => ({
   requestId: req.requestId,
   userAgent: req.get('user-agent') || '',
@@ -88,7 +89,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
     originGuard(config),
     express.json({ limit: '64kb', strict: true }),
   );
-  const authLimiter = limiter(10, 15 * 60_000);
+  const authLimiter = limiter(config.authRateLimit ?? 10, 15 * 60_000);
   const pairingLimiter = limiter(20, 15 * 60_000);
   const authenticated = requireAuth(auth);
   const cookieOptions = {
@@ -117,7 +118,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   }
   app.get('/api/health', async (_req, res) => {
     await db.all('SELECT 1');
-    res.json({ status: 'ok', database: 'ready', phase: 1, sync: 'not_implemented' });
+    res.json({ status: 'ok', database: 'ready', phase: 2, sync: 'not_implemented' });
   });
   app.get('/api/auth/bootstrap-status', async (_req, res) => {
     res.json(await auth.bootstrapStatus());
@@ -276,6 +277,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
       message: 'Durable outbox only. No synchronization worker runs in Phase 1.',
     });
   });
+  registerInventoryRoutes(app, db, auth);
   app.use('/api', () => {
     throw new ApiError(404, 'NOT_FOUND', 'This API endpoint does not exist.');
   });

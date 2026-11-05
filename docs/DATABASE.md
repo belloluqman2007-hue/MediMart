@@ -10,17 +10,19 @@ Both adapters enable foreign keys, WAL, `synchronous=FULL`, and a 5-second busy 
 
 `packages/database/src/migrations.ts` defines ordered SQL statements shared by both runtimes. A transactional bootstrap creates `database_migrations`, then applies:
 
-| Version | Name                                    | Responsibility                                                                  |
-| ------- | --------------------------------------- | ------------------------------------------------------------------------------- |
-| 1       | `identity_security_and_settings`        | Accounts, RBAC, devices, sessions, audit, application settings and indexes      |
-| 2       | `offline_outbox_receipts_and_conflicts` | Per-device cursors, durable operations, receipts, conflict evidence and indexes |
-| 3       | `least_privilege_role_seeds`            | Seven roles, 25 permission codes, explicit grants; **no user accounts**         |
+| Version | Name                                    | Responsibility                                                                                                        |
+| ------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 1       | `identity_security_and_settings`        | Accounts, RBAC, devices, sessions, audit, application settings and indexes                                            |
+| 2       | `offline_outbox_receipts_and_conflicts` | Per-device cursors, durable operations, receipts, conflict evidence and indexes                                       |
+| 3       | `least_privilege_role_seeds`            | Seven roles, 25 permission codes, explicit grants; **no user accounts**                                               |
+| 4       | `inventory_core`                        | Products, categories, units, suppliers, batches, balances, ledger, adjustments; 17 indexes and 4 append-only triggers |
+| 5       | `inventory_seeds`                       | 14 inventory permissions, role grants, 11 units and 11 example categories                                             |
 
 The entire pending plan runs in a serialized `BEGIN IMMEDIATE` transaction. Each ledger entry has a UUID, version, name, SHA-256 checksum, and application timestamp. The runner checks contiguous versions, names and checksums, rejects newer/unknown databases, and checks foreign-key integrity before commit. Failed DDL and ledger writes roll back together.
 
-`seed-v1.ts` is an **immutable historical snapshot**, intentionally independent of the live permission catalog. Editing a released migration, its helpers, or its snapshot is a breaking change. Add version 4+ for changes. There is no automatic destructive downgrade/reset command.
+`seed-v1.ts` is an **immutable historical snapshot**, intentionally independent of the live permission catalog. Editing a released migration, its helpers, or its snapshot is a breaking change. Add version 6+ for changes. There is no automatic destructive downgrade/reset command.
 
-## All 14 tables
+## The 14 Phase 1 tables
 
 | Table                  | Main responsibility / invariants                                                                                                                                 |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,6 +46,25 @@ All tables use SQLite `STRICT` typing. Primary keys and sync-envelope operation/
 `users.password_hash` is nullable **only to leave room for non-authenticating local profile mirrors**. The central registration service always creates an Argon2id hash. Login explicitly rejects profiles without a hash. Password hashes must never be synchronized to devices through the business queue.
 
 All stored timestamps are UTC ISO-8601 strings. Mutating services explicitly update `updated_at`. No monetary business table is created in Phase 1. The shared money contract permits only safe integers in **kobo**; future monetary columns must use `INTEGER` (never `REAL`), appropriate range/typing checks, and domain-specific validation. The generic JSON envelope is not a replacement for domain schemas.
+
+## Inventory tables (Phase 2, 9 tables)
+
+| Table               | Main responsibility / invariants                                                                                                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `units`             | Unique unit code, name, symbol, `is_system`; built-in units are protected from rename/delete                                                                                             |
+| `categories`        | Self-referencing parent, `kind` (`pharmacy`/`minimart`), unique name per parent, cycle protection in the service layer                                                                   |
+| `suppliers`         | Contact and business details, notes, status; deactivated rather than deleted                                                                                                             |
+| `products`          | UUID, type, status, unique non-empty SKU/barcode (case-insensitive), category and base-unit FKs, `CHECK (selling >= purchase)`, created/updated by                                       |
+| `product_units`     | Per-product conversion factors, unique `(product_id, unit_id)`, `CHECK (factor >= 2)`, never equal to the base unit                                                                      |
+| `product_batches`   | Batch number, manufacturing/expiry dates, received and remaining quantity, cost per unit, supplier FK, recorded timestamp, unique `(product_id, batch_number)`, `CHECK (remaining >= 0)` |
+| `stock_balances`    | Cached balance per product/batch with a version counter; never authoritative                                                                                                             |
+| `stock_movements`   | Append-only ledger with `CHECK (new_balance = previous_balance + quantity)`, unique `operation_id`, reason, user, device and reference IDs                                               |
+| `stock_adjustments` | One row per adjustment with direction, reason and permission evidence                                                                                                                    |
+
+Total: **23 tables**. Money columns are INTEGER kobo; quantities are INTEGER base units. The ledger
+is the source of truth and `stock_balances` is a cache verified by `/api/inventory/reconciliation`.
+Migrations v4/v5 only add objects and rows, so applying them to an existing Phase 1 database
+preserves every existing record.
 
 ## Queue and conflict contract
 

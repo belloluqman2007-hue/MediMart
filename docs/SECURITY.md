@@ -50,6 +50,28 @@ Pairing is a trust foundation, **not hardware attestation**. Browser sign-in wit
 - Audit triggers reject UPDATE/DELETE through ordinary SQL access. This is **not tamper-proof protection against an OS administrator who can modify the database file or drop triggers**.
 - Public shell caching explicitly excludes `/api/`. No API response, credential, or business/patient record is cached by the service worker.
 
+### Inventory (Phase 2)
+
+- 16 inventory permissions were added (39 total): `inventory.view`, `inventory.reports.view`,
+  `inventory.settings.manage`, `products.create`, `products.edit`, `products.deactivate`,
+  `categories.manage`, `units.manage`, `batches.view`, `batches.manage`, `stock.view`,
+  `stock.receive`, `stock.adjust`, `stock.write_off`, `suppliers.view`, `suppliers.manage`.
+- Every inventory route requires a live session and a live permission grant. Cashier and
+  healthcare-professional accounts hold none of them by default, and the API returns 403 even when
+  the interface is bypassed. Hiding a button is never the control.
+- `stock.write_off` is checked separately from `stock.adjust`; damaging or expiring stock requires
+  both.
+- Stock can never go negative: the service refuses it, `CHECK` constraints back it up, and the
+  ledger is append-only through triggers that reject `UPDATE` and `DELETE`.
+- Every adjustment requires a 3–500 character reason and stores a `stock_adjustments` row; all
+  mutations write an audit entry inside the same transaction.
+- Idempotent `operation_id` values prevent duplicate movements from retries or device replays;
+  conflicting reuse is rejected. Cached balances are reconciled against the ledger and never
+  silently overwrite newer central stock.
+- Audit detail rows are sanitised — no password, token, pairing secret, or device secret is written.
+- Money is stored and validated as integer kobo, which also removes floating-point rounding risk
+  from stock valuation.
+
 ## Transport deployment
 
 Normal LAN operations must not require a public website, but they still require **transport security**. Wi-Fi membership alone does not make plaintext passwords or patient data safe.

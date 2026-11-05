@@ -1,12 +1,10 @@
+import { inventoryMigrations } from './migrations-inventory';
+import { timestamp, uuid } from './schema-helpers';
 import { permissions, roleCodes, roleLabels, rolePermissions } from './seed-v1';
 export interface Migration {
   version: number;
   name: string;
   statements: readonly string[];
-}
-const timestamp = "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
-function uuid(column: string) {
-  return `${column} TEXT NOT NULL CHECK (length(${column}) = 36 AND substr(${column},9,1) = '-' AND substr(${column},14,1) = '-' AND substr(${column},19,1) = '-' AND substr(${column},24,1) = '-' AND length(replace(${column},'-','')) = 32 AND replace(${column},'-','') NOT GLOB '*[^0-9a-f]*' AND substr(${column},15,1) IN ('1','2','3','4','5','6','7','8') AND substr(${column},20,1) IN ('8','9','a','b'))`;
 }
 export const ledgerSql = `CREATE TABLE IF NOT EXISTS database_migrations (
   ${uuid('id')} PRIMARY KEY, version INTEGER NOT NULL UNIQUE CHECK (version > 0),
@@ -166,4 +164,5 @@ export const migrations: readonly Migration[] = [
   identity,
   sync,
   { version: 3, name: 'least_privilege_role_seeds', statements: seeds },
+  ...inventoryMigrations,
 ];

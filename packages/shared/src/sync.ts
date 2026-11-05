@@ -54,6 +54,27 @@ export const operationSchema = z
         'sync_receipts',
         'sync_conflict',
         'sync_conflicts',
+        // Phase 2 inventory tables are domain entities, but no business handler exists yet.
+        // Until one ships with its own schema and live permission checks, keep them off the
+        // generic queue so an unimplemented worker can never blind-write inventory records.
+        'category',
+        'categories',
+        'unit',
+        'units',
+        'product',
+        'products',
+        'product_unit',
+        'product_units',
+        'product_batch',
+        'product_batches',
+        'supplier',
+        'suppliers',
+        'stock_balance',
+        'stock_balances',
+        'stock_movement',
+        'stock_movements',
+        'stock_adjustment',
+        'stock_adjustments',
       ].includes(op.entityType)
     ) {
       ctx.addIssue({

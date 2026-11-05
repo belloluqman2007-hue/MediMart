@@ -1,4 +1,4 @@
-# Phase 1 API
+# API — Phases 1 and 2
 
 Base path: `/api`. All important write inputs use strict shared Zod schemas. Send `Content-Type: application/json`; request-body limit is 64 KiB. Responses are `Cache-Control: no-store`.
 
@@ -14,7 +14,7 @@ State-changing origin checks apply independently of permissions. No frontend nav
 
 | Method / path                | Access                                                    | Purpose                                                             |
 | ---------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
-| `GET /health`                | Public                                                    | SQLite/API health, phase 1, `sync: not_implemented`                 |
+| `GET /health`                | Public                                                    | SQLite/API health, phase 2, `sync: not_implemented`                 |
 | `GET /auth/bootstrap-status` | Public                                                    | Whether an initial owner is needed and setup is enabled             |
 | `POST /auth/register-owner`  | Valid setup token; no users exist                         | Create the one initial owner and a browser session                  |
 | `POST /auth/login`           | Valid credentials; device proof for native bearer session | Sign in                                                             |
@@ -35,7 +35,42 @@ State-changing origin checks apply independently of permissions. No frontend nav
 | `GET /audit-logs?limit=50`   | `audit.view`                                              | Read up to 100 immutable event records                              |
 | `GET /sync/status`           | `sync.view`                                               | Pending central queue count and explicit `implemented: false`       |
 
-No products, inventory, sales, purchases, prescriptions, patients, financial posting, backup execution, or push/pull sync endpoints exist. Unknown API paths return a JSON 404, not the SPA HTML.
+No sales, POS, debts, purchase orders, supplier payments, prescriptions, patients, financial
+posting, backup execution, or push/pull sync endpoints exist. Unknown API paths return a JSON 404,
+not the SPA HTML.
+
+## Inventory endpoints (Phase 2)
+
+`registerInventoryRoutes` mounts these under `/api`. Every route requires an authenticated session
+**and** the listed permission; the checks run on the server, so hiding UI is never the control.
+
+| Method / path                                                                  | Access                                                 | Purpose                                                             |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------- |
+| `GET /inventory/dashboard`                                                     | `inventory.view`                                       | Counts, cost vs retail value, alerts, recent movements and products |
+| `GET /inventory/alerts`                                                        | `inventory.view`                                       | Expired and near-expiry batches within the alert window             |
+| `GET /inventory/settings`                                                      | `inventory.view`                                       | Expiry alert window                                                 |
+| `PUT /inventory/settings`                                                      | `inventory.settings.manage`                            | Save the alert window (1–365 days) with an audit entry              |
+| `GET /inventory/reconciliation`                                                | `inventory.reports.view`                               | Cached `stock_balances` compared with the ledger                    |
+| `GET /products`                                                                | `inventory.view`                                       | Search, type/category/status/stock filters, sort, pagination        |
+| `POST /products`                                                               | `products.create`                                      | Create a product with unit conversions                              |
+| `GET /products/:id`                                                            | `inventory.view`                                       | Product detail with units and recent movements                      |
+| `PUT /products/:id`                                                            | `products.edit`                                        | Update; base unit locked once stock exists                          |
+| `POST /products/:id/activate` · `/deactivate`                                  | `products.deactivate`                                  | Change status; never deletes history                                |
+| `GET /products/:id/batches`                                                    | `batches.view`                                         | Batches with remaining quantities and expiry state                  |
+| `GET /products/:id/fefo`                                                       | `stock.view`                                           | Read-only first-expired-first-out allocation preview                |
+| `GET /categories` · `POST` · `PUT /:id` · `DELETE /:id`                        | `inventory.view` / `categories.manage`                 | Category tree; delete refused while referenced                      |
+| `GET /units` · `POST` · `PUT /:id` · `DELETE /:id`                             | `inventory.view` / `units.manage`                      | Units; built-in units cannot be renamed or removed                  |
+| `GET /batches`                                                                 | `batches.view`                                         | Batch and expiry listing with filters                               |
+| `GET /stock/movements` · `/stock/movements/:id`                                | `stock.view`                                           | Ledger history and per-movement detail                              |
+| `POST /stock/receive`                                                          | `stock.receive`                                        | Receive stock into a new or existing batch                          |
+| `POST /stock/adjust`                                                           | `stock.adjust` + `stock.write_off` for damaged/expired | Adjustment with a mandatory reason                                  |
+| `GET /stock/fefo/:productId`                                                   | `stock.view`                                           | Same FEFO preview as the product route                              |
+| `GET /suppliers` · `GET /:id`                                                  | `suppliers.view`                                       | Suppliers with linked products and receipt history                  |
+| `POST /suppliers` · `PUT /:id` · `POST /:id/activate` · `POST /:id/deactivate` | `suppliers.manage`                                     | Manage suppliers, never delete them                                 |
+
+Receiving and adjustment payloads carry an `operationId` (client UUID) plus optional `deviceId`.
+Replaying the identical operation returns the stored movement instead of duplicating stock; reusing
+the ID for different content returns `409 OPERATION_CONFLICT`.
 
 ## Main payload shapes
 
@@ -118,6 +153,6 @@ Validation responses may include `fields: Record<string, string[]>`. They never 
 
 A failed login counter, pairing attempt, or security audit is intentionally committed before its error is returned. A failed business/security write transaction rolls back both its data change and corresponding successful-action audit.
 
-## Foundation boundaries
+## Boundaries
 
 Role editing, user disabling/reset administration, full pagination/filtering, expired-session cleanup jobs and account recovery are not implemented. The tables/authorization checks prepare for them. Endpoint schemas and bounded responses are intentionally smaller than future operational modules.

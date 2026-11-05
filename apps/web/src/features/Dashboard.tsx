@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowDownToLine,
@@ -25,10 +26,12 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
+import { hasPermission, type InventoryDashboard } from '@medimart/shared';
 import { useApp } from '../lib/context';
 import { Badge, Button, PageHeading, TextLink } from '../components/ui';
 const metrics = [
   {
+    key: 'sales',
     label: 'Today’s sales',
     icon: ShoppingBag,
     caption: 'A fresh start for your business',
@@ -36,20 +39,23 @@ const metrics = [
     path: '/pos',
   },
   {
-    label: 'Products in stock',
+    key: 'products',
+    label: 'Active products',
     icon: Package,
-    caption: 'Your inventory will appear here',
+    caption: 'Open the inventory workspace',
     tone: 'blue',
     path: '/inventory',
   },
   {
-    label: 'Low-stock items',
+    key: 'lowstock',
+    label: 'Below reorder level',
     icon: Layers3,
     caption: 'Stay a step ahead of restocking',
     tone: 'amber',
-    path: '/inventory',
+    path: '/inventory/products?stock=low',
   },
   {
+    key: 'patients',
     label: 'Registered patients',
     icon: HeartPulse,
     caption: 'Care starts with a connection',
@@ -84,7 +90,40 @@ const modules = [
   },
 ];
 export function Dashboard() {
-  const { user, connection, runtime, bootstrap, refresh } = useApp();
+  const { user, connection, runtime, bootstrap, refresh, api } = useApp();
+  const userId = user?.id;
+  const canSeeInventory = Boolean(user && hasPermission(user.permissions, 'inventory.view'));
+  const [loaded, setLoaded] = useState<{ userId: string; data: InventoryDashboard | null } | null>(
+    null,
+  );
+  // Only the signed-in owner of the fetched figures may see them; stale results are ignored.
+  const inventory = canSeeInventory && loaded && loaded.userId === userId ? loaded.data : null;
+  useEffect(() => {
+    if (!canSeeInventory || !userId) return;
+    let active = true;
+    void api
+      .request<InventoryDashboard>('/api/inventory/dashboard')
+      .then((data) => {
+        if (active) setLoaded({ userId, data });
+      })
+      .catch(() => {
+        if (active) setLoaded({ userId, data: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, canSeeInventory, userId]);
+  const inventoryMetric = (key: string) => {
+    if (!inventory) return null;
+    if (key === 'products')
+      return { value: String(inventory.totalActiveProducts), caption: 'Inventory workspace' };
+    if (key === 'lowstock')
+      return {
+        value: String(inventory.lowStockCount),
+        caption: `${inventory.outOfStockCount} out of stock`,
+      };
+    return null;
+  };
   const online = connection === 'online';
   const date = new Intl.DateTimeFormat('en-GB', {
     day: 'numeric',
@@ -170,35 +209,39 @@ export function Dashboard() {
           </div>
         </div>
         <div className="banner-phase">
-          PHASE 01 <span>FOUNDATION</span>
+          PHASE 02 <span>INVENTORY</span>
         </div>
       </section>
       <div className="section-title">
         <h2>Business overview</h2>
         <span className="subtle-label">
           <span className="hollow-dot" />
-          Ready for your first records
+          {inventory ? 'Inventory is live' : 'Ready for your first records'}
         </span>
       </div>
       <section className="metric-grid" aria-label="Business metrics not yet available">
-        {metrics.map((metric) => (
-          <Link key={metric.label} to={metric.path} className="metric-card">
-            <div className="metric-top">
-              <span className={`icon-tile ${metric.tone}`}>
-                <metric.icon size={20} strokeWidth={1.7} />
-              </span>
-              <span className="metric-period">COMING SOON</span>
-            </div>
-            <h3>{metric.label}</h3>
-            <div className="metric-value">
-              —<span>Not available yet</span>
-            </div>
-            <div className="metric-caption">
-              {metric.caption}
-              <ArrowUpRight size={14} />
-            </div>
-          </Link>
-        ))}
+        {metrics.map((metric) => {
+          const live = inventoryMetric(metric.key);
+          return (
+            <Link key={metric.label} to={metric.path} className="metric-card">
+              <div className="metric-top">
+                <span className={`icon-tile ${metric.tone}`}>
+                  <metric.icon size={20} strokeWidth={1.7} />
+                </span>
+                <span className="metric-period">{live ? 'LIVE' : 'COMING SOON'}</span>
+              </div>
+              <h3>{metric.label}</h3>
+              <div className="metric-value">
+                {live ? live.value : '—'}
+                {!live && <span>Not available yet</span>}
+              </div>
+              <div className="metric-caption">
+                {live ? live.caption : metric.caption}
+                <ArrowUpRight size={14} />
+              </div>
+            </Link>
+          );
+        })}
       </section>
       <div className="dashboard-middle">
         <section className="card setup-card">
@@ -389,8 +432,8 @@ export function Dashboard() {
       </div>
       {!user && (
         <p className="preview-disclaimer">
-          <Plus size={12} /> You’re viewing the Phase 1 foundation. No sales, stock, or patient
-          records are being displayed.
+          <Plus size={12} /> Inventory records are live. Sales, purchasing, and patient modules
+          arrive in later phases.
         </p>
       )}
     </>

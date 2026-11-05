@@ -41,7 +41,7 @@ export function originGuard(config: ApiConfig): RequestHandler {
       res.vary('Origin');
     }
     if (req.method === 'OPTIONS') {
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-CSRF-Token');
       res.status(204).end();
       return;

@@ -99,6 +99,65 @@ test('settings persist and an owner can create a limited staff account', async (
   await page.getByRole('button', { name: 'Create staff account' }).click();
   await expect(page.getByRole('status')).toContainText('Individual staff account created');
 });
+test('an owner can add a product, receive a batch, and audit it in the stock ledger', async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto('/#/inventory/products');
+  await page.getByRole('link', { name: 'Add product', exact: true }).click();
+  await page.getByLabel('Product name', { exact: true }).fill('Browser Test Paracetamol');
+  await page.getByLabel('Generic name').fill('Paracetamol');
+  await page.getByLabel('Barcode').fill('BR-E2E-0001');
+  await page.getByRole('combobox', { name: /Base unit/ }).selectOption({ label: 'Tablet (tab)' });
+  await page.getByLabel('Purchase cost (₦)').fill('50.00');
+  await page.getByLabel('Selling price (₦)').fill('100.00');
+  await page.getByLabel('Reorder level').fill('5');
+  await page.getByRole('button', { name: 'Add product', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Browser Test Paracetamol', exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole('link', { name: 'Receive stock', exact: true }).last().click();
+  await page.getByLabel('Quantity received').fill('10');
+  await page.getByLabel('Cost per unit (₦)').fill('50.00');
+  await page.getByLabel('Batch number').fill('E2E-BATCH-1');
+  const expiry = new Date(Date.now() + 400 * 86_400_000).toISOString().slice(0, 10);
+  await page.getByLabel('Expiry date').fill(expiry);
+  await page.getByRole('button', { name: 'Record receipt' }).click();
+  await expect(page.getByRole('heading', { name: 'Stock received', exact: true })).toBeVisible();
+  await expect(page.getByText('now holds')).toContainText('10 tab');
+
+  await page.goto('/#/inventory/movements');
+  const movementRow = page.locator('table').getByRole('row').filter({ hasText: 'Browser Test' });
+  await expect(movementRow.first()).toContainText('E2E-BATCH-1');
+  await expect(movementRow.first()).toContainText('Stock received');
+
+  await page.goto('/#/inventory/batches');
+  await expect(page.locator('table').getByText('E2E-BATCH-1').first()).toBeVisible();
+
+  await page.goto('/#/inventory/categories');
+  await page.getByRole('button', { name: 'Add category', exact: true }).click();
+  await page.getByLabel('Category name').fill('E2E Test Category');
+  await page.getByRole('button', { name: 'Create category' }).click();
+  await expect(page.getByText('E2E Test Category').first()).toBeVisible();
+
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/#/inventory/products');
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+});
+test('a cashier cannot reach inventory records through the UI or the API', async ({ page }) => {
+  await signIn(page, staff);
+  await page.goto('/#/inventory');
+  await expect(
+    page.getByRole('heading', { name: 'This space needs a different permission', exact: true }),
+  ).toBeVisible();
+  expect((await page.request.get('/api/products')).status()).toBe(403);
+  expect((await page.request.get('/api/inventory/dashboard')).status()).toBe(403);
+});
 test('a cashier sees an explicit permission boundary, not protected module content', async ({
   page,
 }) => {

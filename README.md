@@ -2,7 +2,7 @@
 
 **Business, in good health.** A local-first foundation for pharmacy, mini-mart, and patient-management software.
 
-> **Phase 1 only — ready for foundation review, not business use.** Business modules are navigation placeholders. No inventory, sales, POS transactions, consultations, prescriptions, financial processing, backup jobs, or complete synchronization are implemented. **No APK has been built or verified in this environment.**
+> **Phases 1 and 2 complete — ready for review, not business use.** Inventory management is implemented: products, categories, batches and expiry, the stock ledger, units and conversions, suppliers, the inventory dashboard, and reconciliation. The remaining modules (POS, sales, debts, purchasing, patients, consultations, prescriptions, expenses, reports) are still navigation placeholders. **No APK has been built or verified in this environment.**
 
 ## What works now
 
@@ -12,12 +12,23 @@
 - Argon2id passwords, current-password-verified password changes, revocable sessions, CSRF/origin protection, rate limits, and persistent account lockout.
 - Seven seeded roles and backend-enforced permissions. Administrative writes recheck live grants and session validity inside their transaction.
 - Device registration, expiring pairing codes, authorized approval, proof-bound native sessions, and revocation.
-- Central SQLite database; shared, checksummed migrations for **14 tables**; append-only application audit logs.
+- Central SQLite database; shared, checksummed migrations for **23 tables** (five migrations); append-only application audit logs.
 - Android SQLite/SQLCipher initialization, installation UUIDs, Keystore-backed secret storage, configurable server address, and lifecycle/network hooks.
 - Atomic local-write/outbox primitives, receipt deduplication, and conflict snapshots. **No transport worker or business handlers.**
 - Locally bundled Android assets and fonts. A production browser build can cache its **public shell only** on a secure origin; API responses are never cached.
 
-See the [Phase 1 report](docs/PHASE_1_REPORT.md), [architecture](docs/ARCHITECTURE.md), [database](docs/DATABASE.md), [security](docs/SECURITY.md), [API](docs/API.md), and [Android guide](docs/ANDROID.md).
+### Inventory (Phase 2)
+
+- **Products:** five types (medicine, foodstuff, drinks, snacks, general merchandise), SKU/barcode uniqueness, prices in integer kobo, reorder levels, search, filters, sorting, pagination, activate/deactivate. Products with history are never hard-deleted.
+- **Categories:** two-level tree with 11 seeded examples under Pharmacy and Mini-Mart; delete is refused while products or children reference a category.
+- **Batches and expiry:** multiple batches per product, manufacturing/expiry dates, remaining quantities, supplier references, expired stock blocked from future sale, configurable near-expiry alerts, and products that do not expire.
+- **Stock ledger:** append-only movements (opening stock, receipt, adjustment increase/decrease, damaged, expired, correction) with previous/new balance proof, mandatory reasons, user/device/reference IDs, and idempotent operation IDs. No negative stock; every write is one database transaction.
+- **Units:** 11 built-in units plus custom units and per-product conversions (for example 1 carton = 12 packs, 1 pack = 10 tablets) with integer base-unit arithmetic.
+- **Suppliers:** contact and business details, linked products, and stock-receiving history — no purchasing or payments.
+- **Dashboard and reconciliation:** active products, stock value at cost, retail value shown separately, below-reorder, out-of-stock, expired, nearing expiry, recent movements, newest products, and cached-vs-ledger drift detection.
+- **Permissions:** 16 inventory permissions (39 total) enforced by the API; cashiers and healthcare accounts have no inventory access by default.
+
+See the [Phase 2 report](docs/PHASE_2_REPORT.md), [Phase 1 report](docs/PHASE_1_REPORT.md), [architecture](docs/ARCHITECTURE.md), [database](docs/DATABASE.md), [security](docs/SECURITY.md), [API](docs/API.md), and [Android guide](docs/ANDROID.md).
 
 ## Prerequisites
 
@@ -191,7 +202,7 @@ apps/
   web/
     src/
       components/         Shared UI, shell, application/session provider
-      features/           Dashboard, authentication, settings, module placeholders
+      features/           Dashboard, authentication, settings, inventory, module placeholders
       lib/                API client, context, navigation definitions
       platform/           Browser/native runtime and native SQLite adapter
     public/               Local icon and WebView fallback page
@@ -213,9 +224,11 @@ var/                      Local development DB (ignored)
 - Do not copy a live SQLite file alone as a backup while WAL writes are in progress. Phase 1 has no backup UI or scheduled backup process. See the [database guide](docs/DATABASE.md).
 - Do not clear Android app data or uninstall to fix a connection error. This removes installation identity and local records.
 - A cached shell is **not** offline authentication. Disconnected clients do not receive protected privileges. Offline credential/lease policy and actual offline business operations need a separately approved phase.
+- Inventory writes are online-only in Phase 2: `product*`, `stock_*`, `supplier*`, `category*`, `unit*`, and `product_batch*` entities are denied by the business outbox. The stock ledger is authoritative; cached balances are compared by the reconciliation report, never silently overwritten.
+- Never store money as floating point. Amounts are integer kobo from form input through the database.
 - No paid services, public hosting, or cloud synchronization are required or configured.
 
-**Stop at Phase 1. Phase 2 begins only after the owner reviews and explicitly approves the foundation and its remaining Android verification gate.**
+**Stop after Phase 2. Phase 3 begins only after the owner reviews `docs/PHASE_2_REPORT.md` and explicitly approves it.**
 
 ## Third-party assets
 
