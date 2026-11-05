@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Reserve a narrow, app-private cache path for a future explicit export flow. -->
+    <cache-path name="exports" path="exports/" />
+</paths>
