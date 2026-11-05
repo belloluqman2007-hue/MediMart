@@ -1,0 +1,8 @@
+package-lock.json
+node_modules
+dist
+var
+apps/web/android
+.artifacts
+playwright-report
+test-results

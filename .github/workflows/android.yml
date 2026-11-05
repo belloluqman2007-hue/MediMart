@@ -1,0 +1,36 @@
+name: Android debug verification (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - run: npm ci
+      - run: npm run android:sync
+      - name: Install the target SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Compile the debug application and device-test harness
+        working-directory: apps/web/android
+        run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
+      - name: Verify the package identifier
+        working-directory: apps/web/android
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id app/build/outputs/apk/debug/app-debug.apk | grep -Fx com.medimart.app
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: medimart-debug-unreleased
+          path: apps/web/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7

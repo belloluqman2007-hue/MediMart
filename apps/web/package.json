@@ -1,0 +1,33 @@
+{
+  "name": "@medimart/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build && node ../../scripts/build-offline-shell.mjs",
+    "build:native-dev": "vite build --mode native-development && node ../../scripts/build-offline-shell.mjs"
+  },
+  "dependencies": {
+    "@medimart/database": "0.1.0",
+    "@medimart/shared": "0.1.0",
+    "@aparajita/capacitor-secure-storage": "8.0.1",
+    "@capacitor/android": "8.6.0",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/network": "8.0.1",
+    "@capacitor-community/sqlite": "8.1.1",
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "5.3.0",
+    "lucide-react": "1.69.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router-dom": "7.18.5",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0",
+    "@vitejs/plugin-react": "6.2.1",
+    "vite": "8.3.6"
+  }
+}

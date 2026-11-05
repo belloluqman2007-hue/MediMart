@@ -1,0 +1,35 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+!.env.native-development
+var/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+.cache/
+.DS_Store
+.idea/
+.vscode/
+*.tsbuildinfo
+# Native build output and machine-specific settings
+.gradle/
+**/build/
+**/local.properties
+**/captures/
+*.jks
+*.keystore
+*.apk
+*.aab
+apps/web/android/app/src/main/assets/public/
+apps/web/android/app/src/main/assets/capacitor.config.json
+apps/web/android/app/src/main/assets/capacitor.plugins.json
+apps/web/android/capacitor-cordova-android-plugins/
+# Local browser binary used only when the sandbox cannot download Playwright browsers
+.artifacts/

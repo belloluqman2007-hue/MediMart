@@ -1,0 +1,14 @@
+{
+  "name": "@medimart/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "dependencies": {
+    "@medimart/shared": "0.1.0",
+    "better-sqlite3": "13.0.3"
+  }
+}
