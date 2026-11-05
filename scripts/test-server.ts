@@ -20,6 +20,8 @@ const config: ApiConfig = {
   trustProxyHops: 0,
   sessionHours: 8,
   secureCookies: false,
+  // The browser suite signs in once per scenario; keep the 10-per-15-minute production default out of its way.
+  authRateLimit: 200,
 };
 const server = createApp(db, config, resolve('apps/web/dist')).listen(config.port, config.host);
 const stop = () =>

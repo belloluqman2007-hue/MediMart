@@ -1,4 +1,4 @@
-# Architecture — Phase 1
+# Architecture — Phases 1 and 2
 
 ## Decision
 
@@ -94,6 +94,23 @@ The outbox is durable but currently idle. There is no retry scheduler, queue lea
 - **Multiple phones:** independent local files and installation identities, shared protocol vocabulary, explicit central-server binding. Rebinding enrolled/unsynchronized installations is deliberately refused until a safe migration procedure exists.
 - **Cloud backup/sync:** optional later transport, never a startup or daily-operation prerequisite. Credentials and encryption-key recovery require a separate design.
 - **New business module:** add a domain package/service, a new migration, explicit permissions, strict API contracts, and tests before replacing its placeholder.
+
+## Inventory (Phase 2)
+
+`apps/api/src/services/inventory/` holds the domain layer: `common.ts` (row mappers, permission and
+reference guards), `products.ts` (catalogue CRUD and base-unit locking), `stock.ts` (the ledger
+engine — receiving, adjustments, FEFO, reconciliation, settings), `catalog.ts` (categories, units,
+suppliers), and `dashboard.ts` (aggregates). `apps/api/src/routes/inventory.ts` only validates input,
+guards permissions, and delegates.
+
+The ledger is the only place quantity changes. `recordMovement` inserts the append-only movement row
+and updates the batch and cached balance inside one transaction, so a movement without its balance
+update (or the reverse) cannot be committed. Replays are keyed by `operation_id`.
+
+The frontend mirrors that structure in `apps/web/src/features/inventory/`: `lib.ts` for helpers and
+hooks, `shared.tsx` for components, and one module per page, all under `InventoryLayout`. State that
+depends on a request is derived from a request key rather than assigned inside an effect, which
+keeps the React 19 rules-of-hooks lint clean.
 
 ## Release review gates
 

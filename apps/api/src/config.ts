@@ -22,6 +22,8 @@ export interface ApiConfig {
   trustProxyHops: number;
   sessionHours: number;
   secureCookies: boolean;
+  /** Authentication attempts allowed per 15-minute window. Production uses the default of 10. */
+  authRateLimit?: number;
 }
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const value = envSchema.parse(env);

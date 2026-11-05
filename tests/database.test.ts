@@ -54,15 +54,24 @@ describe('SQLite schema and migrations', () => {
     expect(tables.map((r) => r.name)).toEqual([
       'application_settings',
       'audit_logs',
+      'categories',
       'database_migrations',
       'devices',
       'permissions',
+      'product_batches',
+      'product_units',
+      'products',
       'role_permissions',
       'roles',
+      'stock_adjustments',
+      'stock_balances',
+      'stock_movements',
+      'suppliers',
       'sync_conflicts',
       'sync_devices',
       'sync_queue',
       'sync_receipts',
+      'units',
       'user_roles',
       'user_sessions',
       'users',
@@ -87,7 +96,7 @@ describe('SQLite schema and migrations', () => {
       await writeSetting(old, 'business_name', 'Preserved');
       await migrate(old);
       expect(await readSetting(old, 'business_name')).toBe('Preserved');
-      expect(await old.all('SELECT * FROM database_migrations')).toHaveLength(3);
+      expect(await old.all('SELECT * FROM database_migrations')).toHaveLength(migrations.length);
     } finally {
       await old.close();
     }
@@ -113,7 +122,7 @@ describe('SQLite schema and migrations', () => {
     expect(await db.all("SELECT name FROM sqlite_master WHERE name='must_rollback'")).toHaveLength(
       0,
     );
-    expect(await db.all('SELECT * FROM database_migrations')).toHaveLength(3);
+    expect(await db.all('SELECT * FROM database_migrations')).toHaveLength(migrations.length);
   });
   it('enforces UUID shape, foreign keys, unique grants, and JSON validity', async () => {
     await expect(
@@ -247,7 +256,7 @@ describe('durable outbox and synchronization primitives (no sync engine)', () =>
     const internalTables = await db.all<{ name: string }>(
       "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     );
-    expect(internalTables).toHaveLength(14);
+    expect(internalTables).toHaveLength(23);
     for (const { name: entityType } of internalTables) {
       expect(operationSchema.safeParse(op({ entityType })).success, entityType).toBe(false);
     }
