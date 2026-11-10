@@ -406,7 +406,8 @@ describe('authorization and API boundaries', () => {
           .send({ huge: 'a'.repeat(70_000) })
       ).status,
     ).toBe(413);
-    const missing = await request(app).get('/api/sales');
+    expect((await request(app).get('/api/sales')).status).toBe(401);
+    const missing = await request(app).get('/api/unknown-endpoint');
     expect(missing.status).toBe(404);
     expect(missing.body.error.requestId).toBeTruthy();
     const health = await request(app).get('/api/health');

@@ -26,9 +26,14 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
-import { hasPermission, type InventoryDashboard } from '@medimart/shared';
+import {
+  hasPermission,
+  type InventoryDashboard,
+  type SalesDashboardSummary,
+} from '@medimart/shared';
 import { useApp } from '../lib/context';
 import { Badge, Button, PageHeading, TextLink } from '../components/ui';
+import { formatMoney } from './inventory/lib';
 const metrics = [
   {
     key: 'sales',
@@ -93,11 +98,18 @@ export function Dashboard() {
   const { user, connection, runtime, bootstrap, refresh, api } = useApp();
   const userId = user?.id;
   const canSeeInventory = Boolean(user && hasPermission(user.permissions, 'inventory.view'));
+  const canSeeSales = Boolean(user && hasPermission(user.permissions, 'sales.view'));
   const [loaded, setLoaded] = useState<{ userId: string; data: InventoryDashboard | null } | null>(
     null,
   );
+  const [salesLoaded, setSalesLoaded] = useState<{
+    userId: string;
+    data: SalesDashboardSummary | null;
+  } | null>(null);
   // Only the signed-in owner of the fetched figures may see them; stale results are ignored.
   const inventory = canSeeInventory && loaded && loaded.userId === userId ? loaded.data : null;
+  const sales =
+    canSeeSales && salesLoaded && salesLoaded.userId === userId ? salesLoaded.data : null;
   useEffect(() => {
     if (!canSeeInventory || !userId) return;
     let active = true;
@@ -113,7 +125,28 @@ export function Dashboard() {
       active = false;
     };
   }, [api, canSeeInventory, userId]);
-  const inventoryMetric = (key: string) => {
+  useEffect(() => {
+    if (!canSeeSales || !userId) return;
+    let active = true;
+    void api
+      .request<SalesDashboardSummary>('/api/sales/summary')
+      .then((data) => {
+        if (active) setSalesLoaded({ userId, data });
+      })
+      .catch(() => {
+        if (active) setSalesLoaded({ userId, data: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, canSeeSales, userId]);
+  const liveMetric = (key: string) => {
+    if (key === 'sales' && sales) {
+      return {
+        value: formatMoney(sales.todayFinancials.salesRevenueKobo),
+        caption: `${sales.todayTransactionsCount} transaction${sales.todayTransactionsCount === 1 ? '' : 's'} today`,
+      };
+    }
     if (!inventory) return null;
     if (key === 'products')
       return { value: String(inventory.totalActiveProducts), caption: 'Inventory workspace' };
@@ -209,19 +242,19 @@ export function Dashboard() {
           </div>
         </div>
         <div className="banner-phase">
-          PHASE 02 <span>INVENTORY</span>
+          PHASE 03 <span>POS &amp; SALES</span>
         </div>
       </section>
       <div className="section-title">
         <h2>Business overview</h2>
         <span className="subtle-label">
           <span className="hollow-dot" />
-          {inventory ? 'Inventory is live' : 'Ready for your first records'}
+          {sales || inventory ? 'Sales & inventory are live' : 'Ready for your first records'}
         </span>
       </div>
-      <section className="metric-grid" aria-label="Business metrics not yet available">
+      <section className="metric-grid" aria-label="Business metrics overview">
         {metrics.map((metric) => {
-          const live = inventoryMetric(metric.key);
+          const live = liveMetric(metric.key);
           return (
             <Link key={metric.label} to={metric.path} className="metric-card">
               <div className="metric-top">
@@ -243,6 +276,99 @@ export function Dashboard() {
           );
         })}
       </section>
+      {sales && (
+        <section
+          className="card inventory-card dashboard-sales-strip"
+          aria-label="Today's collections and credit separation"
+        >
+          <div className="card-heading">
+            <div>
+              <h2>Today’s sales, collections &amp; credit separation</h2>
+              <p>
+                Sales revenue, money actually received, unpaid credit, COGS, and gross profit are
+                reported separately.
+              </p>
+            </div>
+            <div className="row-actions">
+              <Link to="/pos" className="button button-primary">
+                Open POS
+              </Link>
+              {hasPermission(user!.permissions, 'reports.view') && (
+                <Link to="/reports" className="button button-secondary">
+                  Full report
+                </Link>
+              )}
+            </div>
+          </div>
+          <div className="inventory-metrics" style={{ margin: '0 21px' }}>
+            <div className="inventory-metric">
+              <span className="muted small">Net sales revenue</span>
+              <div className="metric-value">
+                {formatMoney(sales.todayFinancials.salesRevenueKobo)}
+              </div>
+              <small className="muted">
+                {sales.todayTransactionsCount} completed · {sales.todayVoidedCount} voided
+              </small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Cash received</span>
+              <div className="metric-value">
+                {formatMoney(sales.todayFinancials.cashMethodReceivedKobo)}
+              </div>
+              <small className="muted">Physical cash retained</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Bank transfers received</span>
+              <div className="metric-value">
+                {formatMoney(sales.todayFinancials.bankTransferReceivedKobo)}
+              </div>
+              <small className="muted">Confirmed bank transfers</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">POS terminal received</span>
+              <div className="metric-value">
+                {formatMoney(sales.todayFinancials.posReceivedKobo)}
+              </div>
+              <small className="muted">Card terminal collections</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Today’s credit sales</span>
+              <div className="metric-value">
+                {formatMoney(sales.todayFinancials.periodCreditSalesKobo)}
+              </div>
+              <small className="muted">Unpaid at checkout (not cash)</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Outstanding debts</span>
+              <div className="metric-value">
+                {formatMoney(sales.todayFinancials.outstandingCreditKobo)}
+              </div>
+              <small className="muted">
+                {sales.openDebtCount} open across {sales.customersWithDebtCount} customer
+                {sales.customersWithDebtCount === 1 ? '' : 's'}
+              </small>
+            </div>
+            {sales.todayFinancials.grossProfitKobo !== null && (
+              <>
+                <div className="inventory-metric">
+                  <span className="muted small">Cost of goods sold</span>
+                  <div className="metric-value">
+                    {formatMoney(sales.todayFinancials.costOfGoodsSoldKobo)}
+                  </div>
+                  <small className="muted">Batch-allocated unit cost</small>
+                </div>
+                <div className="inventory-metric">
+                  <span className="muted small">Gross profit (pre-expense)</span>
+                  <div className="metric-value">
+                    {formatMoney(sales.todayFinancials.grossProfitKobo)}
+                  </div>
+                  <small className="muted">Revenue minus COGS</small>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+      )}
       <div className="dashboard-middle">
         <section className="card setup-card">
           <div className="card-heading">
@@ -432,8 +558,8 @@ export function Dashboard() {
       </div>
       {!user && (
         <p className="preview-disclaimer">
-          <Plus size={12} /> Inventory records are live. Sales, purchasing, and patient modules
-          arrive in later phases.
+          <Plus size={12} /> Inventory, Point of Sale, receipts, customers, and debts are live. Sign
+          in to access your business records.
         </p>
       )}
     </>

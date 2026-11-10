@@ -5,7 +5,6 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { Database } from '@medimart/database';
-import { readSetting, writeSetting } from '@medimart/database';
 import {
   approveDeviceSchema,
   businessSettingsSchema,
@@ -25,6 +24,8 @@ import { DeviceService } from './services/devices';
 import { csrfForToken } from './services/crypto';
 import { audit } from './services/audit';
 import { registerInventoryRoutes } from './routes/inventory';
+import { registerSalesRoutes } from './routes/sales';
+import { readShopSettings, writeShopSettings } from './services/sales/common';
 const meta = (req: Request) => ({
   requestId: req.requestId,
   userAgent: req.get('user-agent') || '',
@@ -118,7 +119,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   }
   app.get('/api/health', async (_req, res) => {
     await db.all('SELECT 1');
-    res.json({ status: 'ok', database: 'ready', phase: 2, sync: 'not_implemented' });
+    res.json({ status: 'ok', database: 'ready', phase: 3, sync: 'not_implemented' });
   });
   app.get('/api/auth/bootstrap-status', async (_req, res) => {
     res.json(await auth.bootstrapStatus());
@@ -232,7 +233,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
     },
   );
   app.get('/api/settings', authenticated, requirePermission('settings.view'), async (_req, res) => {
-    res.json({ businessName: (await readSetting<string>(db, 'business_name')) || 'MediMart' });
+    res.json(await readShopSettings(db));
   });
   app.put(
     '/api/settings',
@@ -240,18 +241,19 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
     requirePermission('settings.manage'),
     async (req, res) => {
       const input = businessSettingsSchema.parse(req.body);
-      await db.transaction(async (tx) => {
+      const updated = await db.transaction(async (tx) => {
         await requireActiveContext(tx, req.auth!, 'settings.manage');
-        await writeSetting(tx, 'business_name', input.businessName, { actorId: req.auth!.user.id });
+        const { settings, keys } = await writeShopSettings(tx, input, req.auth!.user.id);
         await audit(tx, {
           action: 'settings.updated',
           actorId: req.auth!.user.id,
           deviceId: req.auth!.deviceId,
           requestId: req.requestId,
-          metadata: { keys: ['business_name'] },
+          metadata: { keys },
         });
+        return settings;
       });
-      res.json(input);
+      res.json(updated);
     },
   );
   app.get('/api/audit-logs', authenticated, requirePermission('audit.view'), async (req, res) => {
@@ -278,6 +280,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
     });
   });
   registerInventoryRoutes(app, db, auth);
+  registerSalesRoutes(app, db, auth);
   app.use('/api', () => {
     throw new ApiError(404, 'NOT_FOUND', 'This API endpoint does not exist.');
   });

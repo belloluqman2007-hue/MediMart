@@ -158,6 +158,10 @@ function PasswordChangeForm() {
 function GeneralSettings() {
   const { user, api, notify, session, signOut } = useApp();
   const [businessName, setBusinessName] = useState('MediMart');
+  const [shopAddress, setShopAddress] = useState('');
+  const [shopPhone, setShopPhone] = useState('');
+  const [shopEmail, setShopEmail] = useState('');
+  const [receiptFooter, setReceiptFooter] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canRead = user && hasPermission(user.permissions, 'settings.view');
@@ -166,9 +170,20 @@ function GeneralSettings() {
     let alive = true;
     if (canRead)
       void api
-        .request<{ businessName: string }>('/api/settings')
+        .request<{
+          businessName: string;
+          shopAddress?: string;
+          shopPhone?: string;
+          shopEmail?: string;
+          receiptFooter?: string;
+        }>('/api/settings')
         .then((value) => {
-          if (alive) setBusinessName(value.businessName);
+          if (!alive) return;
+          setBusinessName(value.businessName);
+          setShopAddress(value.shopAddress ?? '');
+          setShopPhone(value.shopPhone ?? '');
+          setShopEmail(value.shopEmail ?? '');
+          setReceiptFooter(value.receiptFooter ?? '');
         })
         .catch((caught) => {
           if (alive) setError(errorMessage(caught));
@@ -180,7 +195,13 @@ function GeneralSettings() {
   async function save(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    const input = businessSettingsSchema.safeParse({ businessName });
+    const input = businessSettingsSchema.safeParse({
+      businessName,
+      shopAddress,
+      shopPhone,
+      shopEmail,
+      receiptFooter,
+    });
     if (!input.success) {
       setError(input.error.issues[0]!.message);
       return;
@@ -203,8 +224,8 @@ function GeneralSettings() {
             <Settings2 size={20} />
           </div>
           <div>
-            <h2>Business details</h2>
-            <p>A familiar name for your central workspace.</p>
+            <h2>Business &amp; receipt details</h2>
+            <p>Displayed across your workspace and printed on customer receipts.</p>
           </div>
         </div>
         {canRead ? (
@@ -223,6 +244,53 @@ function GeneralSettings() {
                 minLength={2}
                 maxLength={120}
                 required
+                disabled={!canEdit}
+              />
+            </label>
+            <label className="field-label">
+              Shop address (optional)
+              <input
+                name="shopAddress"
+                value={shopAddress}
+                onChange={(event) => setShopAddress(event.target.value)}
+                maxLength={300}
+                placeholder="Street, area, and city printed on receipts"
+                disabled={!canEdit}
+              />
+            </label>
+            <div className="form-two-columns">
+              <label className="field-label">
+                Shop phone (optional)
+                <input
+                  name="shopPhone"
+                  value={shopPhone}
+                  onChange={(event) => setShopPhone(event.target.value)}
+                  maxLength={40}
+                  placeholder="+234 800 000 0000"
+                  disabled={!canEdit}
+                />
+              </label>
+              <label className="field-label">
+                Shop email (optional)
+                <input
+                  name="shopEmail"
+                  type="email"
+                  value={shopEmail}
+                  onChange={(event) => setShopEmail(event.target.value)}
+                  maxLength={254}
+                  placeholder="receipts@example.ng"
+                  disabled={!canEdit}
+                />
+              </label>
+            </div>
+            <label className="field-label">
+              Receipt footer message (optional)
+              <input
+                name="receiptFooter"
+                value={receiptFooter}
+                onChange={(event) => setReceiptFooter(event.target.value)}
+                maxLength={300}
+                placeholder="Thank you for shopping at MediMart."
                 disabled={!canEdit}
               />
             </label>
@@ -265,7 +333,7 @@ function GeneralSettings() {
           </div>
         </div>
         <p className="small muted">
-          No financial calculations or transactions are implemented in this phase.
+          All sales, payments, discounts, and customer debts are calculated in integer kobo.
         </p>
       </section>
       <section className="card settings-card">

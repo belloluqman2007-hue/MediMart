@@ -269,3 +269,130 @@ test('skip navigation and settings tabs work with a keyboard without changing th
   ).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('heading', { name: 'Central server', exact: true })).toBeVisible();
 });
+
+const postChangeOwner = {
+  ...owner,
+  password: 'A fresh browser-only owner passphrase',
+};
+
+test('cashier can scan a barcode at POS, complete a cash sale with change, view receipts, and hits RBAC boundaries on debts and reports', async ({
+  page,
+}) => {
+  await signIn(page, staff);
+  await page.goto('/#/pos');
+  await expect(page.getByRole('heading', { name: 'Checkout terminal', exact: true })).toBeVisible();
+
+  // Scan the medicine barcode created in inventory e2e test
+  await page.getByLabel('Scan barcode or SKU', { exact: true }).fill('BR-E2E-0001');
+  await page.getByRole('button', { name: 'Scan / Add', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Increase quantity of Browser Test Paracetamol', exact: true })
+    .click();
+
+  // 2 tablets @ ₦100.00 = ₦200.00; tender ₦500.00 cash => ₦300.00 change due
+  await page.getByLabel('Cash tendered (₦)', { exact: true }).fill('500.00');
+  await expect(page.getByText('Change due to customer', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /Complete sale/ }).click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('MM-');
+  await expect(dialog).toContainText('300.00');
+  await dialog.getByRole('link', { name: 'Open receipt page', exact: true }).click();
+
+  await expect(page.getByText('OFFICIAL SALES RECEIPT')).toBeVisible();
+  await page.getByRole('button', { name: 'Ordinary paper (A4)' }).click();
+  await expect(page.locator('.receipt-standard')).toBeVisible();
+
+  // Cashier cannot access Debts or Financial Reports
+  await page.goto('/#/debts');
+  await expect(
+    page.getByRole('heading', { name: 'This space needs a different permission', exact: true }),
+  ).toBeVisible();
+  await page.goto('/#/reports');
+  await expect(
+    page.getByRole('heading', { name: 'This space needs a different permission', exact: true }),
+  ).toBeVisible();
+});
+
+test('owner records a part-paid credit sale, settles customer debt, refunds an item, and verifies separated financial reports & WCAG A/AA', async ({
+  page,
+}) => {
+  await signIn(page, postChangeOwner);
+
+  // Register customer and run part-payment credit sale on POS
+  await page.goto('/#/pos');
+  await page.getByRole('button', { name: 'New customer', exact: true }).click();
+  const custModal = page.getByRole('dialog', { name: 'Register customer' });
+  await custModal.getByLabel('Customer full name', { exact: true }).fill('Bolanle Adeyemi');
+  await custModal.getByLabel('Customer phone', { exact: true }).fill('08023456789');
+  await custModal.getByLabel('Credit limit (₦)', { exact: true }).fill('5000.00');
+  await custModal.getByRole('button', { name: 'Save & select customer', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Customer Bolanle Adeyemi registered');
+
+  await page.getByLabel('Scan barcode or SKU', { exact: true }).fill('BR-E2E-0001');
+  await page.getByRole('button', { name: 'Scan / Add', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Increase quantity of Browser Test Paracetamol', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Increase quantity of Browser Test Paracetamol', exact: true })
+    .click();
+
+  // 3 tablets = ₦300.00; pay ₦100.00 cash => ₦200.00 credit balance
+  await page.getByLabel('Cash tendered (₦)', { exact: true }).fill('100.00');
+  await expect(page.getByText('Outstanding credit balance', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /Complete sale/ }).click();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Next customer', exact: true })
+    .click();
+
+  // Settle the ₦200.00 debt on /#/debts
+  await page.goto('/#/debts');
+  await expect(page.locator('table').getByText('Bolanle Adeyemi').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Settle', exact: true }).first().click();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Save repayment', exact: true })
+    .click();
+  await expect(page.getByRole('status')).toContainText('repayment against');
+
+  // Refund 1 tablet from Sales History -> Sale Detail
+  await page.goto('/#/pos/sales');
+  await page.locator('table tbody tr').first().locator('a.row-link').first().click();
+  await page.getByRole('button', { name: 'Process refund', exact: true }).click();
+  const refundDialog = page.getByRole('dialog');
+  await refundDialog
+    .getByLabel('Refund quantity for Browser Test Paracetamol', { exact: true })
+    .fill('1');
+  await refundDialog
+    .getByLabel('Refund reason', { exact: true })
+    .fill('Customer returned 1 unopened tablet');
+  await refundDialog.getByRole('button', { name: 'Record refund', exact: true }).click();
+  await expect(page.getByText('Partially refunded').first()).toBeVisible();
+
+  // Verify separated financial pillars on /#/reports
+  await page.goto('/#/reports');
+  await expect(page.getByText('1 · Sales Revenue')).toBeVisible();
+  await expect(page.getByText('2 · Money Actually Received')).toBeVisible();
+  await expect(page.getByText('3 · Outstanding Credit & Debts')).toBeVisible();
+  await expect(page.getByText('4 · Cost of Goods Sold (COGS)')).toBeVisible();
+  await expect(page.getByText('5 · Gross Profit')).toBeVisible();
+  await expect(page.getByText('6 · Operating Expenses')).toBeVisible();
+
+  // Automated WCAG A/AA check across Phase 3 workspaces
+  for (const route of ['/#/pos', '/#/pos/sales', '/#/customers', '/#/debts', '/#/reports']) {
+    await page.goto(route);
+    await page.waitForLoadState('networkidle');
+    const axe = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .analyze();
+    expect(
+      axe.violations.map(({ id, nodes }) => ({
+        route,
+        id,
+        nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })),
+      })),
+    ).toEqual([]);
+  }
+});

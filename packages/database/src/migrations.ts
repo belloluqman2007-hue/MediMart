@@ -1,4 +1,5 @@
 import { inventoryMigrations } from './migrations-inventory';
+import { salesMigrations } from './migrations-sales';
 import { timestamp, uuid } from './schema-helpers';
 import { permissions, roleCodes, roleLabels, rolePermissions } from './seed-v1';
 export interface Migration {
@@ -171,4 +172,5 @@ export const migrations: readonly Migration[] = [
   sync,
   { version: 3, name: 'least_privilege_role_seeds', statements: seeds },
   ...inventoryMigrations,
+  ...salesMigrations,
 ];
