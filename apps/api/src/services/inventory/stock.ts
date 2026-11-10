@@ -211,17 +211,24 @@ async function operationFingerprint(fields: OperationFields) {
   );
 }
 
-/** The fingerprint of an already stored movement, derived from the ledger row itself. */
+/**
+ * The fingerprint of an already stored movement, derived from the ledger row itself. This is the
+ * fallback for movements recorded before the fingerprint column existed. The ledger stores the
+ * signed quantity, while the submitted base quantity is always positive, so its absolute value
+ * reconstructs exactly what the original request supplied.
+ */
 async function storedFingerprint(row: MovementRow) {
+  const quantity = Number(row.quantity);
   return operationFingerprint({
     productId: row.product_id,
     batchNumber: row.batch_number,
     movementType: row.movement_type,
-    quantity: Number(row.quantity),
+    quantity,
     unitCostKobo: row.unit_cost_kobo === null ? null : Number(row.unit_cost_kobo),
     supplierId: row.supplier_id,
     referenceId: row.reference_id,
     reason: row.reason,
+    baseQuantity: Math.abs(quantity),
   });
 }
 

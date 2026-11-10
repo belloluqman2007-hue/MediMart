@@ -1154,3 +1154,187 @@ describe('phase 2 corrections', () => {
     expect(raised.status).toBe(200);
   });
 });
+
+/**
+ * Movements written before migration 6 carry operation_fingerprint = NULL, so a retry has to
+ * rebuild the fingerprint from the ledger row itself (and still match an identical request).
+ */
+describe('legacy operations without a stored fingerprint', () => {
+  /**
+   * Movements written before migration 6 carry operation_fingerprint = NULL, so retries fall back
+   * to rebuilding the fingerprint from the ledger row itself. The ledger is append-only, so these
+   * fixtures are inserted directly in the shape Phase 2 wrote.
+   */
+  async function legacyReceipt(
+    productId: string,
+    operationId: string,
+    options: { quantity?: number; unitCostKobo?: number; reason?: string } = {},
+  ) {
+    const quantity = options.quantity ?? 1;
+    const unitCostKobo = options.unitCostKobo ?? 4_500;
+    const reason = options.reason ?? 'Legacy delivery from supplier';
+    const batchNumber = `LEGACY-${operationId.slice(0, 8)}`;
+    const batchId = crypto.randomUUID();
+    const baseQuantity = quantity * 10;
+    await db.run(
+      `INSERT INTO product_batches (id,product_id,batch_number,quantity_received,quantity_remaining,purchase_cost_kobo,supplier_id)
+      VALUES (?,?,?,?,?,?,?)`,
+      [batchId, productId, batchNumber, baseQuantity, baseQuantity, unitCostKobo, null],
+    );
+    await db.run('INSERT INTO stock_balances (product_id,quantity,version) VALUES (?,?,1)', [
+      productId,
+      baseQuantity,
+    ]);
+    await db.run(
+      `INSERT INTO stock_movements (id,operation_id,operation_fingerprint,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,unit_cost_kobo,reason,reference_id)
+      VALUES (?,?,NULL,?,?,'stock_received',?,0,?,?,?,?)`,
+      [
+        crypto.randomUUID(),
+        operationId,
+        productId,
+        batchId,
+        baseQuantity,
+        baseQuantity,
+        unitCostKobo,
+        reason,
+        'INV-LEGACY',
+      ],
+    );
+    return { batchId, baseQuantity, batchNumber, unitCostKobo, reason };
+  }
+  const movementCount = async () =>
+    Number((await db.all<{ c: number }>('SELECT COUNT(*) AS c FROM stock_movements'))[0]!.c);
+  const legacyRequest = async (
+    productId: string,
+    operationId: string,
+    fixture: { unitCostKobo: number; reason: string; batchNumber: string },
+    overrides: Record<string, unknown> = {},
+  ) => ({
+    productId,
+    quantity: 1,
+    unitId: await unit('pack'),
+    unitCostKobo: fixture.unitCostKobo,
+    supplierId: null,
+    reason: fixture.reason,
+    referenceId: 'INV-LEGACY',
+    // A genuine retry of the original delivery names the same batch again.
+    batchNumber: fixture.batchNumber,
+    manufacturingDate: null,
+    expiryDate: null,
+    movementType: 'stock_received',
+    operationId,
+    ...overrides,
+  });
+
+  it('replays an identical legacy retry without changing stock', async () => {
+    const product = await createProduct({ isExpiryTracked: false });
+    const operationId = crypto.randomUUID();
+    const fixture = await legacyReceipt(product.id, operationId);
+    const request = await legacyRequest(product.id, operationId, fixture);
+    const retry = await auth(owner, ownerSession).post('/api/stock/receive', request);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.movement.operationId).toBe(operationId);
+    expect(retry.body.movement.quantity).toBe(10);
+    expect(retry.body.product.stockQuantity).toBe(10);
+    expect(await movementCount()).toBe(1);
+    const batch = (
+      await db.all<{ quantity_received: number; quantity_remaining: number }>(
+        'SELECT quantity_received,quantity_remaining FROM product_batches WHERE product_id = ?',
+        [product.id],
+      )
+    )[0]!;
+    expect(Number(batch.quantity_received)).toBe(10);
+    expect(Number(batch.quantity_remaining)).toBe(10);
+    // The original row stays append-only: a replay never rewrites it.
+    const stored = (
+      await db.all<{ operation_fingerprint: string | null }>(
+        'SELECT operation_fingerprint FROM stock_movements WHERE operation_id = ?',
+        [operationId],
+      )
+    )[0]!;
+    expect(stored.operation_fingerprint).toBeNull();
+  });
+
+  it('rejects a changed legacy request for the same operation ID', async () => {
+    const product = await createProduct({ isExpiryTracked: false });
+    const operationId = crypto.randomUUID();
+    const fixture = await legacyReceipt(product.id, operationId);
+    const changes: Array<Record<string, unknown>> = [
+      { unitCostKobo: 4_600 },
+      { reason: 'A different reason entirely' },
+      { referenceId: 'INV-CHANGED' },
+      { quantity: 2 },
+    ];
+    for (const change of changes) {
+      const conflict = await auth(owner, ownerSession).post(
+        '/api/stock/receive',
+        await legacyRequest(product.id, operationId, fixture, change),
+      );
+      expect(conflict.status, JSON.stringify(change)).toBe(409);
+      expect(conflict.body.error.code).toBe('OPERATION_CONFLICT');
+    }
+    expect(await movementCount()).toBe(1);
+    expect(
+      (
+        await db.all<{ quantity: number }>(
+          'SELECT quantity FROM stock_balances WHERE product_id = ?',
+          [product.id],
+        )
+      )[0]!.quantity,
+    ).toBe(10);
+  });
+
+  it('replays identical legacy reductions and rejects a changed one', async () => {
+    const product = await createProduct({ isExpiryTracked: false });
+    const batchId = crypto.randomUUID();
+    await db.run(
+      `INSERT INTO product_batches (id,product_id,batch_number,quantity_received,quantity_remaining,purchase_cost_kobo,supplier_id)
+      VALUES (?,?,?,?,?,?,NULL)`,
+      [batchId, product.id, 'LEGACY-REDUCE', 50, 40, 4_500],
+    );
+    await db.run('INSERT INTO stock_balances (product_id,quantity,version) VALUES (?,?,1)', [
+      product.id,
+      40,
+    ]);
+    await db.run(
+      `INSERT INTO stock_movements (id,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,reason)
+      VALUES (?,?,?,'stock_received',50,0,50,'Legacy delivery')`,
+      [crypto.randomUUID(), product.id, batchId],
+    );
+    const operationId = crypto.randomUUID();
+    await db.run(
+      `INSERT INTO stock_movements (id,operation_id,operation_fingerprint,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,reason)
+      VALUES (?,?,NULL,?,?,'correction',-10,50,40,'Recount found fewer packs')`,
+      [crypto.randomUUID(), operationId, product.id, batchId],
+    );
+    const request = {
+      productId: product.id,
+      batchId,
+      movementType: 'correction',
+      direction: 'decrease',
+      quantity: 1,
+      unitId: await unit('pack'),
+      reason: 'Recount found fewer packs',
+      operationId,
+    };
+    const retry = await auth(owner, ownerSession).post('/api/stock/adjust', request);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.movement.operationId).toBe(operationId);
+    expect(retry.body.movement.quantity).toBe(-10);
+    expect(retry.body.product.stockQuantity).toBe(40);
+    expect(await movementCount()).toBe(2);
+    const changed = await auth(owner, ownerSession).post('/api/stock/adjust', {
+      ...request,
+      quantity: 2,
+    });
+    expect(changed.status).toBe(409);
+    expect(changed.body.error.code).toBe('OPERATION_CONFLICT');
+    const wrongDirection = await auth(owner, ownerSession).post('/api/stock/adjust', {
+      ...request,
+      direction: 'increase',
+    });
+    expect(wrongDirection.status).toBe(409);
+    expect(wrongDirection.body.error.code).toBe('OPERATION_CONFLICT');
+    expect(await movementCount()).toBe(2);
+  });
+});
