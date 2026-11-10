@@ -75,6 +75,27 @@ export const operationSchema = z
         'stock_movements',
         'stock_adjustment',
         'stock_adjustments',
+        // Phase 3 POS, sales, payments, customers, and debts tables remain server-validated.
+        'customer',
+        'customers',
+        'receipt_counter',
+        'receipt_counters',
+        'sale',
+        'sales',
+        'sale_item',
+        'sale_items',
+        'sale_item_allocation',
+        'sale_item_allocations',
+        'sale_payment',
+        'sale_payments',
+        'sale_reversal',
+        'sale_reversals',
+        'sale_reversal_item',
+        'sale_reversal_items',
+        'customer_debt',
+        'customer_debts',
+        'debt_payment',
+        'debt_payments',
       ].includes(op.entityType)
     ) {
       ctx.addIssue({

@@ -22,6 +22,15 @@ import { MovementsPage } from './features/inventory/MovementsPage';
 import { UnitsPage } from './features/inventory/UnitsPage';
 import { SuppliersPage } from './features/inventory/SuppliersPage';
 import { ReconciliationPage } from './features/inventory/ReconciliationPage';
+import { PosLayout } from './features/sales/PosLayout';
+import { PosTerminalPage } from './features/sales/PosTerminalPage';
+import { SalesHistoryPage } from './features/sales/SalesHistoryPage';
+import { SaleDetailPage } from './features/sales/SaleDetailPage';
+import { ReceiptPage } from './features/sales/ReceiptView';
+import { CustomersPage } from './features/sales/CustomersPage';
+import { CustomerDetailPage } from './features/sales/CustomerDetailPage';
+import { DebtsPage } from './features/sales/DebtsPage';
+import { ReportsPage } from './features/sales/ReportsPage';
 import { navigation } from './lib/navigation';
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -100,9 +109,29 @@ export function App({ runtime }: { runtime: Runtime }) {
                 <Route path="reconciliation" element={<ReconciliationPage />} />
               </Route>
               <Route path="suppliers" element={<SuppliersPage />} />
+              <Route path="pos" element={<PosLayout />}>
+                <Route index element={<PosTerminalPage />} />
+                <Route path="sales" element={<SalesHistoryPage />} />
+                <Route path="sales/:id" element={<SaleDetailPage />} />
+                <Route path="receipts/:id" element={<ReceiptPage />} />
+              </Route>
+              <Route path="customers" element={<CustomersPage />} />
+              <Route path="customers/:id" element={<CustomerDetailPage />} />
+              <Route path="debts" element={<DebtsPage />} />
+              <Route path="reports" element={<ReportsPage />} />
               {navigation
                 .filter(
-                  (item) => !['/', '/settings', '/inventory', '/suppliers'].includes(item.path),
+                  (item) =>
+                    ![
+                      '/',
+                      '/settings',
+                      '/inventory',
+                      '/suppliers',
+                      '/pos',
+                      '/customers',
+                      '/debts',
+                      '/reports',
+                    ].includes(item.path),
                 )
                 .map((item) => (
                   <Route

@@ -271,7 +271,7 @@ async function batchNumberOf(tx: SqlExecutor, batchId: string | null) {
  * Apply one signed stock movement: compare-and-set the cached balance, update the batch
  * (when given), then append to the immutable ledger — all inside the caller's transaction.
  */
-async function recordMovement(
+export async function recordMovement(
   tx: SqlExecutor,
   context: MovementContext,
   input: {

@@ -30,6 +30,9 @@ export const stockMovementTypes = [
   'damaged',
   'expired',
   'correction',
+  'sale',
+  'sale_void',
+  'sale_return',
 ] as const;
 export type StockMovementType = (typeof stockMovementTypes)[number];
 export const stockMovementLabels: Record<StockMovementType, string> = {
@@ -40,12 +43,16 @@ export const stockMovementLabels: Record<StockMovementType, string> = {
   damaged: 'Damaged stock',
   expired: 'Expired stock',
   correction: 'Stock correction',
+  sale: 'Sale deduction',
+  sale_void: 'Voided sale return',
+  sale_return: 'Refunded sale return',
 };
 /** Movement types that only ever reduce stock. */
 export const decreaseMovementTypes = [
   'adjustment_decrease',
   'damaged',
   'expired',
+  'sale',
 ] as const satisfies readonly StockMovementType[];
 export const adjustmentMovementTypes = [
   'adjustment_increase',

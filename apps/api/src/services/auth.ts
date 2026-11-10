@@ -418,4 +418,109 @@ export class AuthService {
       });
     });
   }
+  /**
+   * Verify a supervisor's credentials outside the caller's write transaction so Argon2id hashing
+   * never holds a SQLite transaction lock. The caller must still recheck live active status and
+   * permission inside its transaction via `requireSupervisorGrant`.
+   */
+  async verifySupervisorCredentials(
+    email: string,
+    password: string,
+    permission: Permission,
+    requestId: string,
+  ): Promise<{ userId: string }> {
+    const snapshot = (
+      await this.db.all<UserRow>('SELECT * FROM users WHERE email = ? COLLATE NOCASE', [email])
+    )[0];
+    const validPassword = await verifyPassword(
+      snapshot?.password_hash ?? (await this.dummyHash),
+      password,
+    ).catch(() => false);
+    const outcome = await this.db.transaction(async (tx) => {
+      const now = new Date().toISOString();
+      const current = snapshot
+        ? (await tx.all<UserRow>('SELECT * FROM users WHERE id = ?', [snapshot.id]))[0]
+        : undefined;
+      const locked = Boolean(current?.locked_until && current.locked_until > now);
+      const valid =
+        current &&
+        snapshot &&
+        Boolean(current.password_hash) &&
+        validPassword &&
+        current.password_hash === snapshot.password_hash &&
+        current.status === 'active' &&
+        !current.deleted_at &&
+        !locked;
+      if (!valid) {
+        if (current && !locked && current.status === 'active') {
+          const failures =
+            current.locked_until && current.locked_until <= now
+              ? 1
+              : current.failed_login_count + 1;
+          const until = failures >= 5 ? new Date(Date.now() + 15 * 60_000).toISOString() : null;
+          await tx.run(
+            'UPDATE users SET failed_login_count=?,locked_until=?,updated_at=? WHERE id=?',
+            [failures, until, now, current.id],
+          );
+        }
+        await audit(tx, {
+          action: 'auth.supervisor_override_denied',
+          actorId: current?.id,
+          requestId,
+          metadata: { permission, reason: locked ? 'locked' : 'credentials' },
+        });
+        return {
+          error: new ApiError(
+            403,
+            'AUTHORIZATION_FAILED',
+            'Supervisor credentials could not be verified for this action.',
+          ),
+        };
+      }
+      const profile = await getProfile(tx, current.id);
+      if (!profile.permissions.includes(permission)) {
+        await audit(tx, {
+          action: 'auth.supervisor_override_denied',
+          actorId: current.id,
+          requestId,
+          metadata: { permission, reason: 'missing_permission' },
+        });
+        return {
+          error: new ApiError(
+            403,
+            'PERMISSION_DENIED',
+            `That supervisor account does not have ${permission}.`,
+          ),
+        };
+      }
+      await tx.run(
+        'UPDATE users SET failed_login_count=0,locked_until=NULL,updated_at=? WHERE id=?',
+        [now, current.id],
+      );
+      return { userId: current.id };
+    });
+    if (outcome.error) throw outcome.error;
+    return { userId: outcome.userId! };
+  }
+}
+
+export async function requireSupervisorGrant(
+  tx: SqlExecutor,
+  userId: string,
+  permission: Permission,
+): Promise<UserProfile> {
+  const active = await tx.all(
+    "SELECT id FROM users WHERE id = ? AND status = 'active' AND deleted_at IS NULL",
+    [userId],
+  );
+  if (active.length !== 1)
+    throw new ApiError(403, 'AUTHORIZATION_FAILED', 'Supervisor account is not active.');
+  const profile = await getProfile(tx, userId);
+  if (!profile.permissions.includes(permission))
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      `Supervisor account no longer holds ${permission}.`,
+    );
+  return profile;
 }
