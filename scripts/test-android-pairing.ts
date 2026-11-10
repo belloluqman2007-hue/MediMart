@@ -173,8 +173,10 @@ async function envelopeFor(
 }
 
 async function main() {
-  const port = await freePort();
   const external = requestedBase?.replace(/\/$/, '');
+  // When the caller supplies the address a phone will use (the emulator's host alias), the server
+  // must listen on *that* port; otherwise the test would prove nothing about reaching it.
+  const port = external ? Number(new URL(external).port || 80) : await freePort();
   const base = external ?? `http://127.0.0.1:${port}`;
   const server = startServer(port);
   const cleanup = () => {

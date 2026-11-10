@@ -25,6 +25,7 @@
  * an incomplete package would look installed and then fail on the shop's computer.
  */
 import { execFileSync } from 'node:child_process';
+import { runNpm } from './npm-run.mjs';
 import {
   cpSync,
   createWriteStream,
@@ -51,7 +52,6 @@ const zipName = 'MediMart-Windows-x64.zip';
 const zipPath = join(outRoot, zipName);
 const versionedZipPath = join(outRoot, `MediMart-${pkg.version}-win-x64.zip`);
 const isWindows = process.platform === 'win32';
-const npm = isWindows ? 'npm.cmd' : 'npm';
 
 if (!isWindows) {
   console.warn(
@@ -204,10 +204,7 @@ async function main() {
   const runtime = await ensureElectronRuntime();
 
   console.log('1/6 Building the web application and the API bundle…');
-  execFileSync(npm, ['run', 'build'], {
-    cwd: root,
-    stdio: 'inherit',
-  });
+  runNpm(['run', 'build'], { cwd: root });
 
   console.log('2/6 Staging the Electron runtime…');
   rmSync(appDir, { recursive: true, force: true });

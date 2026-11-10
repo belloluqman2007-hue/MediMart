@@ -43,7 +43,9 @@ jobs:
       # Debug profile on purpose: this is the build a shop can install and evaluate. HTTP on a
       # private LAN is allowed in exactly this profile (see apps/web/capacitor.config.ts).
       - name: Build the installable debug APK
-        run: node scripts/build-apk.mjs --profile debug
+        run: |
+          set -o pipefail
+          node scripts/build-apk.mjs --profile debug 2>&1 | tee gradle-build.log
 
       - name: Verify the APK identity, permissions and contents
         run: |
@@ -80,14 +82,25 @@ jobs:
       # can be run on a device without a rebuild. A failure here is printed as an annotation.
       - name: Compile the device-side test harness
         working-directory: apps/web/android
-        run: ./gradlew --no-daemon assembleDebugAndroidTest --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon assembleDebugAndroidTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/gradle-build.log"
 
-      - name: Report a build failure as an annotation
+      # Turn the last compile error into a `::error` annotation, so the failure names its own file
+      # and line in the pull request instead of pointing at a log that may not be downloadable.
+      - name: Report the failing source line as an annotation
         if: failure()
         run: |
-          echo "::error title=Android APK build failed::Gradle or APK verification failed. The step above names the failing task; the full log is in this job."
-          ls -la apps/web/android/app/build/outputs/apk/debug/ 2>/dev/null || true
-          ls -la apps/web/android/app/build/outputs/apk/androidTest/debug/ 2>/dev/null || true
+          LOG=gradle-build.log
+          if [ -f "$LOG" ]; then
+            grep -E "^(e: |.*\.java:[0-9]+: error:|.*\.gradle.*: error:|.*> Could not resolve)" "$LOG" | head -3 | while IFS= read -r line; do
+              echo "::error title=Android build failure::${line//%/%%}"
+            done
+            echo "----- last 80 lines -----"
+            tail -80 "$LOG"
+          fi
+          ls -la apps/web/android/app/build/outputs/apk/debug/ || true
+          ls -la apps/web/android/app/build/outputs/apk/androidTest/debug/ || true
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -127,8 +140,10 @@ jobs:
         with:
           name: MediMart-Android
           path: apk
-      - name: Install dependencies for the live server test
-        run: npm ci --no-audit --no-fund
+      - name: Install dependencies and build the server the pairing test talks to
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
 
       # API 27 (Android 8.1) is the oldest image GitHub's emulator runner reliably boots; the app
       # itself declares minSdk 24 (Android 7.0). Testing 8.1 keeps the claim honest for the older
