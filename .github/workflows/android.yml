@@ -22,6 +22,9 @@ on:
       - 'packages/**'
       - 'scripts/build-apk.mjs'
       - 'scripts/sync-android.mjs'
+      - 'scripts/android-emulator.sh'
+      - 'scripts/test-android-pairing.ts'
+      - '.github/workflows/android.yml'
       - '.github/workflows/android.yml'
 permissions:
   contents: read
