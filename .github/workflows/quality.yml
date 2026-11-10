@@ -28,10 +28,13 @@ jobs:
         run: |
           npm run build
           npm run test:production
+      # One retry, on CI only: two suites in this file (service-worker activation and the fully
+      # offline reload) depend on browser timing rather than application behaviour. The Windows job
+      # runs the same suite without retries, so a retry can never turn a real regression green.
       - name: Browser end-to-end tests
         run: |
           npx playwright install --with-deps chromium
-          npx playwright test
+          npx playwright test --retries=1
       - name: Device pairing and offline synchronization over the network
         # The same script the Android emulator job runs, exercised from the host: owner setup,
         # staff account, pairing code, device session, offline push, replay and revocation.

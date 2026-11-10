@@ -201,8 +201,18 @@ test('public shell reopens offline without caching API responses or granting a s
 }) => {
   await page.goto('/');
   await page.evaluate(() => navigator.serviceWorker.ready);
+  // Service-worker timing differs between machines: the first registration does not control the
+  // page that registered it until it is claimed. Reload until it is in control rather than
+  // assuming a single activation tick.
   await expect
-    .poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
+    .poll(
+      async () => {
+        if (await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) return true;
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        return page.evaluate(() => Boolean(navigator.serviceWorker.controller));
+      },
+      { timeout: 30_000, intervals: [500, 1_000, 2_000] },
+    )
     .toBe(true);
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });

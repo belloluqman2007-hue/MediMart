@@ -76,15 +76,35 @@ jobs:
           "$A" manifest version-code "$APK"
           echo "APK verified: $(stat -c%s "$APK") bytes"
 
-      - name: Compile the device-side test harness too
+      # The instrumentation harness is compiled (and its APK uploaded) so `connectedDebugAndroidTest`
+      # can be run on a device without a rebuild. A failure here is printed as an annotation.
+      - name: Compile the device-side test harness
         working-directory: apps/web/android
-        run: ./gradlew --no-daemon assembleDebugAndroidTest
+        run: ./gradlew --no-daemon assembleDebugAndroidTest --stacktrace
+
+      - name: Report a build failure as an annotation
+        if: failure()
+        run: |
+          echo "::error title=Android APK build failed::Gradle or APK verification failed. The step above names the failing task; the full log is in this job."
+          ls -la apps/web/android/app/build/outputs/apk/debug/ 2>/dev/null || true
+          ls -la apps/web/android/app/build/outputs/apk/androidTest/debug/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: MediMart-Android
           path: dist/android/medimart-debug.apk
           retention-days: 30
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: android-build-evidence
+          path: |
+            apps/web/android/app/build/outputs/apk/debug/
+            apps/web/android/app/build/outputs/apk/androidTest/debug/
+            apps/web/android/app/build/reports/
+          if-no-files-found: warn
+          retention-days: 14
 
   device:
     # Install that exact APK on a real Android runtime, launch it, then drive the pairing and
