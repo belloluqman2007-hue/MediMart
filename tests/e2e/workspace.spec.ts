@@ -89,7 +89,7 @@ test('settings persist and an owner can create a limited staff account', async (
   await page.goto('/#/settings');
   await page.getByLabel('Business name', { exact: true }).fill('MediMart browser test');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Business name saved');
+  await expect(page.locator('.toast[role="status"]')).toContainText('Business name saved');
   await page.reload();
   await expect(page.getByLabel('Business name', { exact: true })).toHaveValue(
     'MediMart browser test',
@@ -100,7 +100,9 @@ test('settings persist and an owner can create a limited staff account', async (
   await page.getByLabel('Role', { exact: true }).selectOption('cashier');
   await page.getByLabel('Initial password', { exact: true }).fill(staff.password);
   await page.getByRole('button', { name: 'Create staff account' }).click();
-  await expect(page.getByRole('status')).toContainText('Individual staff account created');
+  await expect(page.locator('.toast[role="status"]')).toContainText(
+    'Individual staff account created',
+  );
 });
 test('an owner can add a product, receive a batch, and audit it in the stock ledger', async ({
   page,
@@ -343,7 +345,9 @@ test('owner records a part-paid credit sale, settles customer debt, refunds an i
   await custModal.getByLabel('Customer phone', { exact: true }).fill('08023456789');
   await custModal.getByLabel('Credit limit (₦)', { exact: true }).fill('5000.00');
   await custModal.getByRole('button', { name: 'Save & select customer', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Customer Bolanle Adeyemi registered');
+  await expect(page.locator('.toast[role="status"]')).toContainText(
+    'Customer Bolanle Adeyemi registered',
+  );
 
   await page.getByLabel('Scan barcode or SKU', { exact: true }).fill('BR-E2E-0001');
   await page.getByRole('button', { name: 'Scan / Add', exact: true }).click();
@@ -371,7 +375,7 @@ test('owner records a part-paid credit sale, settles customer debt, refunds an i
     .getByRole('dialog')
     .getByRole('button', { name: 'Save repayment', exact: true })
     .click();
-  await expect(page.getByRole('status')).toContainText('repayment against');
+  await expect(page.locator('.toast[role="status"]')).toContainText('repayment against');
 
   // Refund 1 tablet from Sales History -> Sale Detail
   await page.goto('/#/pos/sales');
@@ -649,13 +653,13 @@ test('owner synchronizes, creates a verified backup, and restores it with explic
 
   // A backup is a real file: create it, then confirm it appears in the history with a checksum.
   await page.getByRole('button', { name: 'Create backup now', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText(/backup/i, { timeout: 20_000 });
+  await expect(page.locator('.toast[role="status"]')).toContainText(/backup/i, { timeout: 20_000 });
   const history = page.locator('.backup-sync-grid ~ .card').filter({ hasText: 'Backup history' });
   await expect(history).toContainText('.sqlite');
   const verify = page.getByRole('button', { name: /^Verify$/ }).first();
   await expect(verify).toBeVisible();
   await verify.click();
-  await expect(page.getByRole('status')).toContainText(/intact|verified/i);
+  await expect(page.locator('.toast[role="status"]')).toContainText(/intact|verified/i);
 
   // Restore is gated behind typing the word, and says what will happen before it happens.
   await page
