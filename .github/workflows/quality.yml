@@ -1,3 +1,8 @@
+# Foundation checks: formatting, types, lint, unit/API tests, production build and browsers.
+#
+# This is the workflow that gates the pull request. It runs the same commands a developer runs
+# locally (`npm run check` and `npm run test:e2e`) so a green run here means the repository is
+# actually healthy, not that a subset was checked.
 name: Foundation checks
 on:
   push:
@@ -7,17 +12,30 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
+      - run: npm ci --no-audit --no-fund
       - run: npm run format:check
-      - run: npm run check
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - name: Production build and compiled-server smoke test
+        run: |
+          npm run build
+          npm run test:production
+      - name: Browser end-to-end tests
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - name: Device pairing and offline synchronization over the network
+        # The same script the Android emulator job runs, exercised from the host: owner setup,
+        # staff account, pairing code, device session, offline push, replay and revocation.
+        run: node --import=tsx scripts/test-android-pairing.ts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:

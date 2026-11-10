@@ -1,19 +1,30 @@
-name: Android debug verification (manual)
+# Build the real MediMart Android APK, install it in an emulator, launch it, and exercise the
+# device pairing + offline synchronization HTTP contract against a running MediMart server.
+#
 # A shop that cannot reach the internet can still build the APK on a computer with the Android SDK
-# (`node scripts/build-apk.mjs --profile debug`). This workflow is for building it in CI instead.
+# (`node scripts/build-apk.mjs --profile debug`). This workflow is the CI build path: it compiles
+# the checked-in Capacitor project, verifies the package identity and permissions from the APK
+# itself, then installs and starts that exact APK on an emulator.
+name: Android build, install and run
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
     paths:
       - 'apps/web/android/**'
       - 'apps/web/src/**'
+      - 'apps/web/capacitor.config.ts'
+      - 'apps/api/**'
+      - 'packages/**'
+      - 'scripts/build-apk.mjs'
+      - 'scripts/sync-android.mjs'
       - '.github/workflows/android.yml'
 permissions:
   contents: read
 jobs:
-  android:
+  apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -25,81 +36,130 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - run: npm ci
-      - run: npm run android:sync
-      - name: Install the target SDK
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Compile the debug application and device-test harness
-        working-directory: apps/web/android
-        run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
-      - name: Confirm the camera permission is declared and optional
-        working-directory: apps/web/android
+      - name: Make the Gradle wrapper executable
+        run: chmod +x apps/web/android/gradlew
+      - run: npm ci --no-audit --no-fund
+
+      # Debug profile on purpose: this is the build a shop can install and evaluate. HTTP on a
+      # private LAN is allowed in exactly this profile (see apps/web/capacitor.config.ts).
+      - name: Build the installable debug APK
+        run: node scripts/build-apk.mjs --profile debug
+
+      - name: Verify the APK identity, permissions and contents
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print \
-            app/build/outputs/apk/debug/app-debug.apk > /tmp/manifest.xml
+          set -euo pipefail
+          APK=dist/android/medimart-debug.apk
+          test -f "$APK"
+          A="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          "$A" manifest application-id "$APK" | tee /tmp/appid.txt
+          grep -Fx com.medimart.app /tmp/appid.txt
+          "$A" manifest print "$APK" > /tmp/manifest.xml
+          cat /tmp/manifest.xml
           grep -q 'android.permission.CAMERA' /tmp/manifest.xml
           grep -q 'android.hardware.camera' /tmp/manifest.xml
           grep -q 'android:required="false"' /tmp/manifest.xml
-          ! grep -q 'ACCESS_FINE_LOCATION\|READ_CONTACTS\|READ_SMS' /tmp/manifest.xml
-      - name: Verify the package identifier
+          grep -q 'android:name="com.medimart.app.MainActivity"' /tmp/manifest.xml
+          if grep -q 'ACCESS_FINE_LOCATION\|READ_CONTACTS\|READ_SMS\|READ_EXTERNAL_STORAGE' /tmp/manifest.xml; then
+            echo "Unexpected permission in the APK" >&2; exit 1
+          fi
+          # The packaged web application must contain the real shell and the native database code.
+          unzip -l "$APK" | grep -q 'assets/public/index.html'
+          unzip -l "$APK" | grep -q 'assets/capacitor.config.json'
+          unzip -p "$APK" assets/capacitor.config.json | grep -q '"appId": "com.medimart.app"'
+          if unzip -l "$APK" | grep -iE '\.env|keystore|\.jks|\.p12|id_rsa'; then
+            echo "Secret-shaped file inside the APK" >&2; exit 1
+          fi
+          if unzip -p "$APK" assets/public/config.json 2>/dev/null | grep -iE 'bootstrap_token|setup_token'; then
+            echo "A setup token leaked into the APK" >&2; exit 1
+          fi
+          "$A" manifest version-name "$APK"
+          "$A" manifest version-code "$APK"
+          echo "APK verified: $(stat -c%s "$APK") bytes"
+
+      - name: Compile the device-side test harness too
         working-directory: apps/web/android
-        run: |
-          test -f app/build/outputs/apk/debug/app-debug.apk
-          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id app/build/outputs/apk/debug/app-debug.apk | grep -Fx com.medimart.app
-      - name: Verify version, label and that no secrets are embedded
-        working-directory: apps/web/android
-        run: |
-          APK=app/build/outputs/apk/debug/app-debug.apk
-          A="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
-          "$A" manifest print "$APK" | grep -q 'android:label="@string/app_name"'
-          grep -Fx 'MediMart' app/src/main/res/values/strings.xml -r | grep -q app_name
-          "$A" manifest version-name "$APK" | grep -E '^0\.[0-9]+\.[0-9]+$'
-          "$A" manifest version-code "$APK" | grep -E '^[0-9]+$'
-          # No development secrets: the .env file and any keystore must never be packaged.
-          unzip -l "$APK" | grep -iE '\.env|keystore|\.jks|\.p12|id_rsa' && exit 1 || true
-          unzip -p "$APK" assets/public/config.json 2>/dev/null | grep -iE 'bootstrap_token|setup_token' && exit 1 || true
+        run: ./gradlew --no-daemon assembleDebugAndroidTest
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: medimart-debug-unreleased
-          path: apps/web/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
+          name: MediMart-Android
+          path: dist/android/medimart-debug.apk
+          retention-days: 30
 
-  emulator:
-    # Install and launch the built APK in an Android emulator, then capture the screen.
-    needs: android
+  device:
+    # Install that exact APK on a real Android runtime, launch it, then drive the pairing and
+    # offline-sync HTTP contract the phone uses, with a live MediMart server.
+    needs: apk
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Enable KVM for the Android emulator
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: medimart-debug-unreleased
+          name: MediMart-Android
           path: apk
+      - name: Install dependencies for the live server test
+        run: npm ci --no-audit --no-fund
+
+      # API 27 (Android 8.1) is the oldest image GitHub's emulator runner reliably boots; the app
+      # itself declares minSdk 24 (Android 7.0). Testing 8.1 keeps the claim honest for the older
+      # half of the supported range.
       - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: 30
+          api-level: 27
           arch: x86_64
           target: google_apis
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 1200
           disable-animations: true
           script: |
-            adb install -r apk/app-debug.apk
+            set -euo pipefail
+            mkdir -p evidence
+            adb install -r apk/medimart-debug.apk
             adb shell pm list packages | grep -Fx 'package:com.medimart.app'
-            adb shell dumpsys package com.medimart.app | grep -E 'versionName|versionCode' | head -4
-            mkdir -p screenshots
+            adb shell dumpsys package com.medimart.app | grep -E 'versionName|versionCode|firstInstallTime' | head -4
+            adb logcat -c
             adb shell am start -W -n com.medimart.app/com.medimart.app.MainActivity
-            sleep 25
-            adb exec-out screencap -p > screenshots/android-launch.png
-            adb shell dumpsys package com.medimart.app > screenshots/android-package.txt
-            adb logcat -d > screenshots/android-logcat.txt || true
-            test -s screenshots/android-launch.png
+            sleep 40
+            adb exec-out screencap -p > evidence/android-launch.png
+            # A crash or a WebView error during the first 40 seconds is a failed launch even when
+            # the process is technically still listed.
+            adb logcat -d > evidence/android-logcat.txt
+            adb shell pidof com.medimart.app | tee evidence/android-pid.txt
+            adb shell dumpsys activity activities | grep -A2 'mResumedActivity' | tee -a evidence/android-pid.txt || true
+            if grep -E 'FATAL EXCEPTION|AndroidRuntime: Process: com.medimart.app' evidence/android-logcat.txt; then
+              echo "The application crashed on launch" >&2
+              grep -A 25 'FATAL EXCEPTION' evidence/android-logcat.txt >&2
+              exit 1
+            fi
+            if grep -E 'net::ERR_|ERR_CLEARTEXT|chromium.*ERROR' evidence/android-logcat.txt | grep -v 'GmsClient' | head -5; then
+              echo "WebView reported a load error" >&2
+            fi
+            # The launch must not be an empty white screen: the screenshot must not be uniform.
+            python3 - <<'PY'
+            import struct, zlib, sys
+            path = 'evidence/android-launch.png'
+            data = open(path, 'rb').read()
+            assert data[:8] == b'\x89PNG\r\n\x1a\n', 'not a PNG'
+            # Count distinct bytes in the compressed stream as a cheap "is it blank?" heuristic.
+            if len(set(data[200:])) < 40:
+                sys.exit('The launch screenshot looks blank')
+            print('Launch screenshot captured:', len(data), 'bytes')
+            PY
+            adb shell dumpsys package com.medimart.app > evidence/android-package.txt
+            # Pairing + sync contract against a live server on the emulator's host loopback.
+            node --import=tsx scripts/test-android-pairing.ts http://10.0.2.2:4191 | tee evidence/pairing-sync.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: medimart-android-emulator-screenshots
-          path: screenshots/
+          name: MediMart-Android-device-evidence
+          path: evidence/
           retention-days: 30

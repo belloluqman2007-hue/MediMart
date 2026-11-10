@@ -1,106 +1,163 @@
-# Build the Windows desktop application on a real Windows runner and smoke-test it.
-# The packaged server runs under the Electron runtime, so its native modules must be compiled on
-# Windows for Electron's ABI. This workflow is the genuine build path; `npm run desktop:build` on a
-# non-Windows machine refuses for the same reason.
+# Build the MediMart Windows desktop application on a real Windows runner.
+#
+# The packaged server runs under the Electron runtime (ELECTRON_RUN_AS_NODE), so its native modules
+# must work inside Electron's ABI on Windows. `npm run desktop:build` marks a package verified only
+# when it was produced on Windows, and the self-test below is what actually proves it: it starts the
+# packaged MediMart.exe, lets it bring up its own server and database, and asks that server to serve
+# the bundled interface.
+#
+# Every step that can fail prints the evidence it failed on: the packaged app writes a JSON
+# diagnostics report and a log, and both are uploaded even when the job fails.
 name: Windows desktop application
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
     paths:
       - 'apps/desktop/**'
       - 'apps/api/**'
       - 'apps/web/src/**'
       - 'packages/**'
-      - 'scripts/build-desktop.mjs'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/desktop.yml'
 permissions:
   contents: read
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
-      - name: Typecheck, lint and the full test suite on Windows
+
+      # `npm ci` compiles nothing here on purpose: better-sqlite3 13 and argon2 0.45 ship
+      # N-API prebuilds for win32-x64 inside their own packages, so no Visual Studio C++ workload
+      # and no network round-trip to a Node header host are needed. If a package ever loses its
+      # prebuild the failure is a real one and is reported, not hidden.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+        env:
+          npm_config_loglevel: warn
+
+      - name: Show the toolchain
         run: |
+          node --version
+          npm --version
+
+      - name: Prettier, typecheck, lint
+        run: |
+          npm run format:check
           npm run typecheck
           npm run lint
-          npm test
-      - name: Production build and smoke test
+
+      - name: Automated test suite
+        run: npm test
+
+      - name: Production build and compiled-server smoke test
         run: |
           npm run build
           npm run test:production
+
       - name: Browser end-to-end tests
         run: |
-          npx playwright install --with-deps chromium
-          npm run test:e2e
-      - name: Package the desktop application (native modules rebuilt for Electron)
+          npx playwright install chromium
+          npx playwright test
+
+      - name: Package the desktop application
         run: node scripts/build-desktop.mjs
-      - name: Packaged smoke test — the exact runtime path (ELECTRON_RUN_AS_NODE)
+
+      - name: Verify the packaged tree statically
+        run: node scripts/verify-desktop-package.mjs
+
+      - name: Inspect the packaged tree
         shell: pwsh
         run: |
-          $pkg = "dist/desktop/MediMart-win32-x64"
-          $env:ELECTRON_RUN_AS_NODE = "1"
-          $env:NODE_ENV = "production"
-          $env:API_HOST = "127.0.0.1"
-          $env:API_PORT = "4791"
-          $env:DATABASE_PATH = "$env:RUNNER_TEMP\smoke\data\medimart.sqlite"
-          $env:BACKUP_DIR = "$env:RUNNER_TEMP\smoke\backups"
-          $env:BOOTSTRAP_TOKEN = ("f" * 64)
-          $env:COOKIE_SECURE = "false"
-          $env:MEDIMART_MANAGED_DESKTOP = "true"
-          $env:MEDIMART_ALLOW_LAN_HTTP = "true"
-          $env:ALLOWED_ORIGINS = "http://127.0.0.1:4791"
-          $env:DESKTOP_ALLOWED_ORIGINS = "http://127.0.0.1:4791"
-          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\smoke\data", "$env:RUNNER_TEMP\smoke\backups" | Out-Null
-          $proc = Start-Process -FilePath "$pkg\MediMart.exe" -ArgumentList "resources\server\index.js" -WorkingDirectory "$pkg\resources\server" -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\smoke\out.log" -RedirectStandardError "$env:RUNNER_TEMP\smoke\err.log" -WindowStyle Hidden
-          $health = $null
-          foreach ($i in 1..30) {
-            Start-Sleep -Seconds 2
-            try { $health = Invoke-RestMethod "http://127.0.0.1:4791/api/health" -TimeoutSec 3 } catch { }
-            if ($health) { break }
+          $pkg = "dist\desktop\MediMart-win32-x64"
+          Get-ChildItem $pkg | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+          foreach ($required in @(
+            "MediMart.exe",
+            "resources\app\package.json",
+            "resources\app\launch.mjs",
+            "resources\app\main.mjs",
+            "resources\server\index.js",
+            "resources\server\apps\web\dist\index.html",
+            "resources\server\node_modules\better-sqlite3\prebuilds\win32-x64.node",
+            "resources\server\node_modules\argon2\prebuilds\win32-x64"
+          )) {
+            if (-not (Test-Path (Join-Path $pkg $required))) { throw "Packaged file missing: $required" }
           }
-          if (-not $health) { Get-Content "$env:RUNNER_TEMP\smoke\out.log", "$env:RUNNER_TEMP\smoke\err.log"; throw "Packaged server did not answer /api/health" }
-          if ($health.status -ne "ok") { throw "Unexpected health payload: $($health | ConvertTo-Json -Compress)" }
-          Write-Host "Packaged server health: $($health | ConvertTo-Json -Compress)"
-          # The first-owner setup page must render from the packaged bundle.
-          $page = Invoke-WebRequest "http://127.0.0.1:4791/" -TimeoutSec 5
-          if ($page.StatusCode -ne 200 -or $page.Content -notmatch "MediMart") { throw "Packaged web bundle did not serve the app shell" }
-          Stop-Process -Id $proc.Id -Force
-          Write-Host "Packaged smoke test passed."
-      - name: Launch the window and capture a screenshot
-        continue-on-error: true # a headless runner capture is best-effort evidence, not the build
+          Get-Item dist\desktop\MediMart-Windows-x64.zip | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+
+      # The genuine runtime path: the packaged MediMart.exe starts its own server, migrates a fresh
+      # database inside the temporary data folder, serves the built interface and exits with a
+      # status code. No window is opened and no source copy is used.
+      - name: Packaged application self-test (Electron runtime)
         shell: pwsh
         run: |
-          $pkg = "dist/desktop/MediMart-win32-x64"
+          $pkg = "$PWD\dist\desktop\MediMart-win32-x64"
+          $report = "$env:RUNNER_TEMP\desktop-diagnostics.json"
+          $env:MEDIMART_DESKTOP_DIAGNOSTICS = $report
+          $env:MEDIMART_DESKTOP_PORT = "4791"
+          $env:APPDATA = "$env:RUNNER_TEMP\appdata"
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+          & "$pkg\MediMart.exe"
+          $code = $LASTEXITCODE
+          Write-Host "MediMart.exe exit code: $code"
+          if (Test-Path $report) { Get-Content $report }
+          if ($code -ne 0) { throw "The packaged application self-test failed (exit $code)." }
+          $json = Get-Content $report -Raw | ConvertFrom-Json
+          if (-not $json.ok) { throw "Diagnostics reported a failure: $($json | ConvertTo-Json -Depth 6)" }
+          if ($json.platform -ne "win32-x64") { throw "Unexpected platform $($json.platform)" }
+          Write-Host "Packaged self-test passed on $($json.platform), Electron $($json.electron)"
+
+      - name: Launch the window and capture a screenshot
+        shell: pwsh
+        run: |
+          $pkg = "dist\desktop\MediMart-win32-x64"
           $env:MEDIMART_DESKTOP_PORT = "4792"
           $proc = Start-Process -FilePath "$pkg\MediMart.exe" -PassThru
-          Start-Sleep -Seconds 25
+          $healthy = $false
+          foreach ($i in 1..60) {
+            Start-Sleep -Seconds 2
+            try {
+              $health = Invoke-RestMethod "http://127.0.0.1:4792/api/health" -TimeoutSec 3
+              if ($health.status -eq "ok") { $healthy = $true; break }
+            } catch { }
+          }
+          New-Item -ItemType Directory -Force -Path screenshots | Out-Null
+          if (-not $healthy) {
+            Get-Content "$env:APPDATA\MediMart\logs\medimart.log" -ErrorAction SilentlyContinue
+            throw "The launched window did not bring up its local server."
+          }
+          Start-Sleep -Seconds 10
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
           $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
           $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
           $graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bitmap.Size)
-          New-Item -ItemType Directory -Force -Path screenshots | Out-Null
-          $bitmap.Save("screenshots/windows-desktop.png", [System.Drawing.Imaging.ImageFormat]::Png)
-          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          $bitmap.Save("$PWD\screenshots\windows-desktop.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          Copy-Item "$env:APPDATA\MediMart\logs\medimart.log" screenshots -ErrorAction SilentlyContinue
           Get-Process -Name MediMart -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          Write-Host "Screenshot saved."
+          Write-Host "Window launch verified and screenshot captured."
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: medimart-windows-dist
+          name: MediMart-Windows-x64
           path: |
-            dist/desktop/MediMart-*-win-x64.zip
+            dist/desktop/MediMart-Windows-x64.zip
             dist/desktop/build-manifest.json
-          retention-days: 30
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: medimart-windows-screenshots
-          path: screenshots/
+          name: windows-desktop-evidence
+          path: |
+            screenshots/
+            ${{ runner.temp }}/desktop-diagnostics.json
+          if-no-files-found: warn
           retention-days: 30
