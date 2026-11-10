@@ -205,6 +205,28 @@ async function assertUniqueIdentifiers(tx: SqlExecutor, input: ProductInput, exc
   }
 }
 
+/**
+ * Selling below cost is never free-form: it needs the explicit acknowledgement from the request
+ * and the `products.price.below_cost` authorisation, checked here against live grants so the rule
+ * cannot be bypassed by calling the API directly.
+ */
+async function belowCostDecision(tx: SqlExecutor, auth: AuthContext, input: ProductInput) {
+  const belowCost = input.sellingPriceKobo < input.purchaseCostKobo;
+  if (!belowCost) return null;
+  if (!input.allowBelowCost)
+    throw new ApiError(
+      400,
+      'BELOW_COST_NOT_CONFIRMED',
+      'Confirm that the selling price is below the purchase cost.',
+    );
+  await assertPermission(tx, auth, 'products.price.below_cost');
+  return {
+    purchaseCostKobo: input.purchaseCostKobo,
+    sellingPriceKobo: input.sellingPriceKobo,
+    shortfallKobo: input.purchaseCostKobo - input.sellingPriceKobo,
+  };
+}
+
 async function replaceUnits(tx: SqlExecutor, productId: string, input: ProductInput) {
   await tx.run('DELETE FROM product_units WHERE product_id = ?', [productId]);
   for (const unit of input.units)
@@ -227,6 +249,7 @@ export async function createProduct(
 ) {
   return db.transaction(async (tx) => {
     await assertPermission(tx, auth, 'products.create');
+    const belowCost = await belowCostDecision(tx, auth, input);
     await validateProductReferences(tx, input);
     await assertUniqueIdentifiers(tx, input);
     const id = crypto.randomUUID();
@@ -268,6 +291,16 @@ export async function createProduct(
       entityId: id,
       metadata: { productType: input.productType, expiryTracked: input.isExpiryTracked },
     });
+    if (belowCost)
+      await audit(tx, {
+        action: 'product.below_cost_pricing',
+        actorId: auth.user.id,
+        deviceId: auth.deviceId,
+        requestId,
+        entityType: 'product',
+        entityId: id,
+        metadata: belowCost,
+      });
     return getProductDetail(tx, id);
   });
 }
@@ -282,6 +315,7 @@ export async function updateProduct(
   return db.transaction(async (tx) => {
     await assertPermission(tx, auth, 'products.edit');
     const existing = await loadProduct(tx, id);
+    const belowCost = await belowCostDecision(tx, auth, input);
     await validateProductReferences(tx, input);
     await assertUniqueIdentifiers(tx, input, id);
     const balance = (
@@ -334,6 +368,20 @@ export async function updateProduct(
       entityId: id,
       metadata: { status: input.status },
     });
+    if (belowCost)
+      await audit(tx, {
+        action: 'product.below_cost_pricing',
+        actorId: auth.user.id,
+        deviceId: auth.deviceId,
+        requestId,
+        entityType: 'product',
+        entityId: id,
+        metadata: {
+          ...belowCost,
+          previousSellingPriceKobo: Number(existing.selling_price_kobo),
+          previousPurchaseCostKobo: Number(existing.purchase_cost_kobo),
+        },
+      });
     return getProductDetail(tx, id);
   });
 }

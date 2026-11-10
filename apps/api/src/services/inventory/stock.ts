@@ -10,7 +10,7 @@ import type {
   StockMovementType,
   StockReceiveInput,
 } from '@medimart/shared';
-import { decreaseMovementTypes } from '@medimart/shared';
+import { decreaseMovementTypes, sha256 } from '@medimart/shared';
 import type { AuthContext } from '../auth';
 import { ApiError } from '../../errors';
 import { audit } from '../audit';
@@ -174,28 +174,97 @@ export async function listBatches(
 
 type MovementContext = { auth: AuthContext; requestId: string };
 
+/** Movement types that represent a delivery of new stock, as opposed to a balance correction. */
+const receivingMovementTypes: readonly StockMovementType[] = ['opening_stock', 'stock_received'];
+
+type OperationFields = {
+  productId: string;
+  batchNumber: string | null;
+  movementType: StockMovementType;
+  quantity: number;
+  unitCostKobo: number | null;
+  supplierId: string | null;
+  referenceId: string | null;
+  reason: string;
+  baseQuantity?: number;
+};
+
+/**
+ * Canonical fingerprint of every business field an operation may not change when its ID is
+ * retried. The field order is fixed and batch numbers are compared case-insensitively (the
+ * database stores them with COLLATE NOCASE), so the same request always hashes identically.
+ */
+async function operationFingerprint(fields: OperationFields) {
+  return sha256(
+    JSON.stringify([
+      'stock-operation-v1',
+      fields.productId,
+      fields.batchNumber ? fields.batchNumber.trim().toUpperCase() : null,
+      fields.movementType,
+      fields.quantity,
+      fields.unitCostKobo,
+      fields.supplierId,
+      fields.referenceId,
+      fields.reason.trim(),
+      fields.baseQuantity ?? null,
+    ]),
+  );
+}
+
+/**
+ * The fingerprint of an already stored movement, derived from the ledger row itself. This is the
+ * fallback for movements recorded before the fingerprint column existed. The ledger stores the
+ * signed quantity, while the submitted base quantity is always positive, so its absolute value
+ * reconstructs exactly what the original request supplied.
+ */
+async function storedFingerprint(row: MovementRow) {
+  const quantity = Number(row.quantity);
+  return operationFingerprint({
+    productId: row.product_id,
+    batchNumber: row.batch_number,
+    movementType: row.movement_type,
+    quantity,
+    unitCostKobo: row.unit_cost_kobo === null ? null : Number(row.unit_cost_kobo),
+    supplierId: row.supplier_id,
+    referenceId: row.reference_id,
+    reason: row.reason,
+    baseQuantity: Math.abs(quantity),
+  });
+}
+
 async function findOperation(tx: SqlExecutor, operationId: string) {
   return (
     await tx.all<MovementRow>(`${movementSelect} WHERE m.operation_id = ?`, [operationId])
   )[0];
 }
 
-function assertIdempotentReplay(
-  existing: MovementRow | undefined,
-  expected: { productId: string; movementType: StockMovementType; quantity: number },
-) {
+/**
+ * A retry of an identical operation returns the original result; any difference in the submitted
+ * business fields is a conflict rather than a new movement.
+ */
+async function replayOperation(existing: MovementRow | undefined, expected: OperationFields) {
   if (!existing) return null;
-  if (
-    existing.product_id !== expected.productId ||
-    existing.movement_type !== expected.movementType ||
-    Number(existing.quantity) !== expected.quantity
-  )
+  const fingerprint = await operationFingerprint(expected);
+  const original = existing.operation_fingerprint ?? (await storedFingerprint(existing));
+  if (original !== fingerprint)
     throw new ApiError(
       409,
       'OPERATION_CONFLICT',
       'This operation ID was already used for a different stock movement.',
     );
   return mapMovement(existing);
+}
+
+/** Batch numbers identify a batch within a product, so they are the stable part of the fingerprint. */
+async function batchNumberOf(tx: SqlExecutor, batchId: string | null) {
+  if (!batchId) return null;
+  const row = (
+    await tx.all<{ batch_number: string }>(
+      'SELECT batch_number FROM product_batches WHERE id = ?',
+      [batchId],
+    )
+  )[0];
+  return row?.batch_number ?? null;
 }
 
 /**
@@ -215,6 +284,7 @@ async function recordMovement(
     referenceId: string | null;
     supplierId: string | null;
     operationId: string | null;
+    operationFingerprint: string;
     baseQuantity: number;
     adjustmentReason?: boolean;
   },
@@ -266,8 +336,10 @@ async function recordMovement(
         'INSUFFICIENT_BATCH_STOCK',
         'This batch does not contain enough stock for that movement.',
       );
+    // Only a genuine delivery adds to the historical received quantity; a positive adjustment or
+    // correction changes the remaining balance alone.
     const received =
-      input.delta > 0
+      input.delta > 0 && receivingMovementTypes.includes(input.movementType)
         ? Number(batch.quantity_received) + input.delta
         : Number(batch.quantity_received);
     const updated = await tx.run(
@@ -283,11 +355,12 @@ async function recordMovement(
   }
   const movementId = crypto.randomUUID();
   await tx.run(
-    `INSERT INTO stock_movements (id,operation_id,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,unit_cost_kobo,reason,reference_id,supplier_id,user_id,device_id,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    `INSERT INTO stock_movements (id,operation_id,operation_fingerprint,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,unit_cost_kobo,reason,reference_id,supplier_id,user_id,device_id,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       movementId,
       input.operationId,
+      input.operationId ? input.operationFingerprint : null,
       input.productId,
       input.batchId,
       input.movementType,
@@ -360,9 +433,30 @@ export async function receiveStock(
         'Reactivate this product before receiving stock for it.',
       );
     const baseQuantity = await toBaseQuantity(tx, product, input.unitId, input.quantity);
-    const replay = assertIdempotentReplay(
+    const fingerprint = await operationFingerprint({
+      productId: input.productId,
+      batchNumber: input.batchNumber ?? null,
+      movementType: input.movementType,
+      quantity: baseQuantity,
+      unitCostKobo: input.unitCostKobo,
+      supplierId: input.supplierId ?? null,
+      referenceId: input.referenceId ?? null,
+      reason: input.reason,
+      baseQuantity,
+    });
+    const replay = await replayOperation(
       input.operationId ? await findOperation(tx, input.operationId) : undefined,
-      { productId: input.productId, movementType: input.movementType, quantity: baseQuantity },
+      {
+        productId: input.productId,
+        batchNumber: input.batchNumber ?? null,
+        movementType: input.movementType,
+        quantity: baseQuantity,
+        unitCostKobo: input.unitCostKobo,
+        supplierId: input.supplierId ?? null,
+        referenceId: input.referenceId ?? null,
+        reason: input.reason,
+        baseQuantity,
+      },
     );
     if (replay)
       return { movement: replay, product: mapProduct(await loadProduct(tx, input.productId)) };
@@ -449,6 +543,7 @@ export async function receiveStock(
         referenceId: input.referenceId ?? null,
         supplierId: input.supplierId ?? null,
         operationId: input.operationId ?? null,
+        operationFingerprint: fingerprint,
         baseQuantity,
       },
     );
@@ -476,9 +571,21 @@ export async function adjustStock(
         ? (input.direction ?? 'decrease') === 'decrease'
         : false;
     const delta = decrease ? -baseQuantity : baseQuantity;
-    const replay = assertIdempotentReplay(
+    const operation = {
+      productId: input.productId,
+      batchNumber: await batchNumberOf(tx, input.batchId ?? null),
+      movementType: input.movementType,
+      quantity: delta,
+      unitCostKobo: null,
+      supplierId: null,
+      referenceId: input.referenceId ?? null,
+      reason: input.reason,
+      baseQuantity,
+    };
+    const fingerprint = await operationFingerprint(operation);
+    const replay = await replayOperation(
       input.operationId ? await findOperation(tx, input.operationId) : undefined,
-      { productId: input.productId, movementType: input.movementType, quantity: delta },
+      operation,
     );
     if (replay) return { movement: replay, product: mapProduct(await loadProduct(tx, product.id)) };
     if (product.status !== 'active' && !decrease)
@@ -519,6 +626,7 @@ export async function adjustStock(
         referenceId: input.referenceId ?? null,
         supplierId: null,
         operationId: input.operationId ?? null,
+        operationFingerprint: fingerprint,
         baseQuantity,
         adjustmentReason: true,
       },

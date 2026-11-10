@@ -9,6 +9,8 @@ export const permissions = [
   'inventory.settings.manage',
   'products.create',
   'products.edit',
+  /** Owner-level authorisation to price a product below its purchase cost. */
+  'products.price.below_cost',
   'products.deactivate',
   'categories.manage',
   'units.manage',

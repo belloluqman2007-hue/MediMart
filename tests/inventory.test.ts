@@ -904,3 +904,437 @@ describe('inventory permissions', () => {
     expect(serialized).not.toMatch(/password|token|secret/i);
   });
 });
+
+describe('phase 2 corrections', () => {
+  async function adjust(productId: string, overrides: Record<string, unknown> = {}) {
+    return auth(owner, ownerSession).post('/api/stock/adjust', {
+      productId,
+      movementType: 'adjustment_increase',
+      quantity: 1,
+      unitId: await unit('pack'),
+      reason: 'Recount found an extra pack',
+      ...overrides,
+    });
+  }
+  async function batchOf(productId: string) {
+    return (
+      await db.all<{ id: string; batch_number: string }>(
+        'SELECT id,batch_number FROM product_batches WHERE product_id = ? ORDER BY batch_number',
+        [productId],
+      )
+    )[0]!;
+  }
+  async function batchRow(id: string) {
+    return (
+      await db.all<{ quantity_received: number; quantity_remaining: number }>(
+        'SELECT quantity_received,quantity_remaining FROM product_batches WHERE id = ?',
+        [id],
+      )
+    )[0]!;
+  }
+
+  it('replays an identical operation without duplicating stock', async () => {
+    const product = await createProduct();
+    const operationId = crypto.randomUUID();
+    const body = {
+      operationId,
+      batchNumber: 'IDEM-1',
+      supplierId: null,
+      unitCostKobo: 4_500,
+      referenceId: 'INV-IDEM',
+    };
+    const first = await receive(product.id, body);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const again = await receive(product.id, body);
+    expect(again.status).toBe(201);
+    expect(again.body.movement.id).toBe(first.body.movement.id);
+    expect(again.body.product.stockQuantity).toBe(10);
+    expect(
+      Number((await db.all<{ c: number }>('SELECT COUNT(*) AS c FROM stock_movements'))[0]!.c),
+    ).toBe(1);
+    expect(Number((await batchRow((await batchOf(product.id)).id)).quantity_received)).toBe(10);
+  });
+
+  it('rejects reusing an operation ID for a different batch', async () => {
+    const product = await createProduct();
+    const operationId = crypto.randomUUID();
+    expect((await receive(product.id, { operationId, batchNumber: 'BATCH-A' })).status).toBe(201);
+    const conflict = await receive(product.id, { operationId, batchNumber: 'BATCH-B' });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe('OPERATION_CONFLICT');
+    expect(
+      Number((await db.all<{ c: number }>('SELECT COUNT(*) AS c FROM stock_movements'))[0]!.c),
+    ).toBe(1);
+    const adjusted = await adjust(product.id, {
+      operationId,
+      batchId: (await batchOf(product.id)).id,
+    });
+    expect(adjusted.status).toBe(409);
+    expect(adjusted.body.error.code).toBe('OPERATION_CONFLICT');
+  });
+
+  it('rejects a different supplier or cost for the same operation ID', async () => {
+    const supplier = await auth(owner, ownerSession).post('/api/suppliers', {
+      name: 'Idempotency Wholesale',
+      contactPerson: '',
+      phone: '',
+      email: '',
+      address: '',
+      businessInfo: '',
+      notes: '',
+      status: 'active',
+    });
+    expect(supplier.status).toBe(201);
+    const product = await createProduct();
+    const operationId = crypto.randomUUID();
+    expect(
+      (
+        await receive(product.id, {
+          operationId,
+          batchNumber: 'COST-1',
+          supplierId: supplier.body.id,
+        })
+      ).status,
+    ).toBe(201);
+    const otherSupplier = await auth(owner, ownerSession).post('/api/suppliers', {
+      name: 'Second Idempotency Wholesale',
+      contactPerson: '',
+      phone: '',
+      email: '',
+      address: '',
+      businessInfo: '',
+      notes: '',
+      status: 'active',
+    });
+    const supplierConflict = await receive(product.id, {
+      operationId,
+      batchNumber: 'COST-1',
+      supplierId: otherSupplier.body.id,
+    });
+    expect(supplierConflict.status).toBe(409);
+    expect(supplierConflict.body.error.code).toBe('OPERATION_CONFLICT');
+    const costConflict = await receive(product.id, {
+      operationId,
+      batchNumber: 'COST-1',
+      supplierId: supplier.body.id,
+      unitCostKobo: 4_600,
+    });
+    expect(costConflict.status).toBe(409);
+    expect(costConflict.body.error.code).toBe('OPERATION_CONFLICT');
+  });
+
+  it('does not inflate quantity received for positive adjustments or corrections', async () => {
+    const product = await createProduct();
+    expect((await receive(product.id, { batchNumber: 'RECV-1' })).status).toBe(201);
+    const batch = await batchOf(product.id);
+    expect(Number((await batchRow(batch.id)).quantity_received)).toBe(10);
+    expect(
+      (
+        await adjust(product.id, {
+          batchId: batch.id,
+          movementType: 'adjustment_increase',
+          quantity: 2,
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await adjust(product.id, {
+          batchId: batch.id,
+          movementType: 'correction',
+          direction: 'increase',
+          quantity: 1,
+        })
+      ).status,
+    ).toBe(201);
+    const after = await batchRow(batch.id);
+    expect(Number(after.quantity_received)).toBe(10);
+    expect(Number(after.quantity_remaining)).toBe(40);
+    const detail = await auth(owner, ownerSession).get(`/api/products/${product.id}`);
+    expect(detail.body.stockQuantity).toBe(40);
+    expect(detail.body.batches[0].quantityReceived).toBe(10);
+    const report = await auth(owner, ownerSession).get('/api/inventory/reconciliation');
+    expect(report.body.inconsistentCount).toBe(0);
+  });
+
+  it('increases quantity received for a genuine receiving operation', async () => {
+    const product = await createProduct();
+    const body = { batchNumber: 'RECV-2' };
+    expect((await receive(product.id, body)).status).toBe(201);
+    const batch = await batchOf(product.id);
+    expect(Number((await batchRow(batch.id)).quantity_received)).toBe(10);
+    // Opening stock is a genuine receiving movement too, but only before any other movement.
+    expect((await receive(product.id, { ...body })).status).toBe(409);
+    const other = await createProduct({ name: 'Opening Stock Product', isExpiryTracked: false });
+    const opening = await auth(owner, ownerSession).post('/api/stock/receive', {
+      productId: other.id,
+      quantity: 5,
+      unitId: await unit('pack'),
+      unitCostKobo: 3_000,
+      supplierId: null,
+      reason: 'Opening stock count',
+      batchNumber: 'OPEN-1',
+      movementType: 'opening_stock',
+    });
+    expect(opening.status, JSON.stringify(opening.body)).toBe(201);
+    const openingBatch = await batchOf(other.id);
+    expect(Number((await batchRow(openingBatch.id)).quantity_received)).toBe(50);
+  });
+
+  it('requires permission before a selling price may go below cost', async () => {
+    const product = await createProduct();
+    const pharmacist = await staff(['pharmacist'], 'below-cost@inventory.test');
+    const belowCost = async (overrides: Record<string, unknown> = {}) =>
+      productBody({
+        name: 'Loss Leader',
+        purchaseCostKobo: 20_000,
+        sellingPriceKobo: 5_000,
+        ...overrides,
+      });
+    // The acknowledgement alone is not enough to accept the price.
+    const unconfirmed = await auth(owner, ownerSession).put(
+      `/api/products/${product.id}`,
+      await belowCost(),
+    );
+    expect(unconfirmed.status).toBe(400);
+    // A user who may edit products but lacks the pricing permission is refused by the API.
+    const denied = await pharmacist.put(
+      `/api/products/${product.id}`,
+      await belowCost({ allowBelowCost: true }),
+    );
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('PERMISSION_DENIED');
+    const stillPriced = await auth(owner, ownerSession).get(`/api/products/${product.id}`);
+    expect(stillPriced.body.sellingPriceKobo).toBe(10_000);
+    // The owner may authorise it, and the database no longer forbids the stored price.
+    const allowed = await auth(owner, ownerSession).put(
+      `/api/products/${product.id}`,
+      await belowCost({ allowBelowCost: true }),
+    );
+    expect(allowed.status, JSON.stringify(allowed.body)).toBe(200);
+    expect(allowed.body.sellingPriceKobo).toBe(5_000);
+    expect(
+      (
+        await db.all<{ selling_price_kobo: number }>(
+          'SELECT selling_price_kobo FROM products WHERE id = ?',
+          [product.id],
+        )
+      )[0]!.selling_price_kobo,
+    ).toBe(5_000);
+  });
+
+  it('audits below-cost pricing decisions', async () => {
+    const created = await auth(owner, ownerSession).post(
+      '/api/products',
+      await productBody({
+        name: 'Audited Loss Leader',
+        purchaseCostKobo: 30_000,
+        sellingPriceKobo: 9_000,
+        allowBelowCost: true,
+      }),
+    );
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const logs = await auth(owner, ownerSession).get('/api/audit-logs?limit=100');
+    const entries = logs.body.entries.filter(
+      (entry: { action: string }) => entry.action === 'product.below_cost_pricing',
+    );
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[0].entity_id).toBe(created.body.id);
+    expect(JSON.parse(entries[0].metadata_json).shortfallKobo).toBe(21_000);
+    // Raising the price later above cost is not a below-cost decision.
+    const raised = await auth(owner, ownerSession).put(
+      `/api/products/${created.body.id}`,
+      await productBody({
+        name: 'Audited Loss Leader',
+        purchaseCostKobo: 30_000,
+        sellingPriceKobo: 40_000,
+        allowBelowCost: false,
+      }),
+    );
+    expect(raised.status).toBe(200);
+  });
+});
+
+/**
+ * Movements written before migration 6 carry operation_fingerprint = NULL, so a retry has to
+ * rebuild the fingerprint from the ledger row itself (and still match an identical request).
+ */
+describe('legacy operations without a stored fingerprint', () => {
+  /**
+   * Movements written before migration 6 carry operation_fingerprint = NULL, so retries fall back
+   * to rebuilding the fingerprint from the ledger row itself. The ledger is append-only, so these
+   * fixtures are inserted directly in the shape Phase 2 wrote.
+   */
+  async function legacyReceipt(
+    productId: string,
+    operationId: string,
+    options: { quantity?: number; unitCostKobo?: number; reason?: string } = {},
+  ) {
+    const quantity = options.quantity ?? 1;
+    const unitCostKobo = options.unitCostKobo ?? 4_500;
+    const reason = options.reason ?? 'Legacy delivery from supplier';
+    const batchNumber = `LEGACY-${operationId.slice(0, 8)}`;
+    const batchId = crypto.randomUUID();
+    const baseQuantity = quantity * 10;
+    await db.run(
+      `INSERT INTO product_batches (id,product_id,batch_number,quantity_received,quantity_remaining,purchase_cost_kobo,supplier_id)
+      VALUES (?,?,?,?,?,?,?)`,
+      [batchId, productId, batchNumber, baseQuantity, baseQuantity, unitCostKobo, null],
+    );
+    await db.run('INSERT INTO stock_balances (product_id,quantity,version) VALUES (?,?,1)', [
+      productId,
+      baseQuantity,
+    ]);
+    await db.run(
+      `INSERT INTO stock_movements (id,operation_id,operation_fingerprint,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,unit_cost_kobo,reason,reference_id)
+      VALUES (?,?,NULL,?,?,'stock_received',?,0,?,?,?,?)`,
+      [
+        crypto.randomUUID(),
+        operationId,
+        productId,
+        batchId,
+        baseQuantity,
+        baseQuantity,
+        unitCostKobo,
+        reason,
+        'INV-LEGACY',
+      ],
+    );
+    return { batchId, baseQuantity, batchNumber, unitCostKobo, reason };
+  }
+  const movementCount = async () =>
+    Number((await db.all<{ c: number }>('SELECT COUNT(*) AS c FROM stock_movements'))[0]!.c);
+  const legacyRequest = async (
+    productId: string,
+    operationId: string,
+    fixture: { unitCostKobo: number; reason: string; batchNumber: string },
+    overrides: Record<string, unknown> = {},
+  ) => ({
+    productId,
+    quantity: 1,
+    unitId: await unit('pack'),
+    unitCostKobo: fixture.unitCostKobo,
+    supplierId: null,
+    reason: fixture.reason,
+    referenceId: 'INV-LEGACY',
+    // A genuine retry of the original delivery names the same batch again.
+    batchNumber: fixture.batchNumber,
+    manufacturingDate: null,
+    expiryDate: null,
+    movementType: 'stock_received',
+    operationId,
+    ...overrides,
+  });
+
+  it('replays an identical legacy retry without changing stock', async () => {
+    const product = await createProduct({ isExpiryTracked: false });
+    const operationId = crypto.randomUUID();
+    const fixture = await legacyReceipt(product.id, operationId);
+    const request = await legacyRequest(product.id, operationId, fixture);
+    const retry = await auth(owner, ownerSession).post('/api/stock/receive', request);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.movement.operationId).toBe(operationId);
+    expect(retry.body.movement.quantity).toBe(10);
+    expect(retry.body.product.stockQuantity).toBe(10);
+    expect(await movementCount()).toBe(1);
+    const batch = (
+      await db.all<{ quantity_received: number; quantity_remaining: number }>(
+        'SELECT quantity_received,quantity_remaining FROM product_batches WHERE product_id = ?',
+        [product.id],
+      )
+    )[0]!;
+    expect(Number(batch.quantity_received)).toBe(10);
+    expect(Number(batch.quantity_remaining)).toBe(10);
+    // The original row stays append-only: a replay never rewrites it.
+    const stored = (
+      await db.all<{ operation_fingerprint: string | null }>(
+        'SELECT operation_fingerprint FROM stock_movements WHERE operation_id = ?',
+        [operationId],
+      )
+    )[0]!;
+    expect(stored.operation_fingerprint).toBeNull();
+  });
+
+  it('rejects a changed legacy request for the same operation ID', async () => {
+    const product = await createProduct({ isExpiryTracked: false });
+    const operationId = crypto.randomUUID();
+    const fixture = await legacyReceipt(product.id, operationId);
+    const changes: Array<Record<string, unknown>> = [
+      { unitCostKobo: 4_600 },
+      { reason: 'A different reason entirely' },
+      { referenceId: 'INV-CHANGED' },
+      { quantity: 2 },
+    ];
+    for (const change of changes) {
+      const conflict = await auth(owner, ownerSession).post(
+        '/api/stock/receive',
+        await legacyRequest(product.id, operationId, fixture, change),
+      );
+      expect(conflict.status, JSON.stringify(change)).toBe(409);
+      expect(conflict.body.error.code).toBe('OPERATION_CONFLICT');
+    }
+    expect(await movementCount()).toBe(1);
+    expect(
+      (
+        await db.all<{ quantity: number }>(
+          'SELECT quantity FROM stock_balances WHERE product_id = ?',
+          [product.id],
+        )
+      )[0]!.quantity,
+    ).toBe(10);
+  });
+
+  it('replays identical legacy reductions and rejects a changed one', async () => {
+    const product = await createProduct({ isExpiryTracked: false });
+    const batchId = crypto.randomUUID();
+    await db.run(
+      `INSERT INTO product_batches (id,product_id,batch_number,quantity_received,quantity_remaining,purchase_cost_kobo,supplier_id)
+      VALUES (?,?,?,?,?,?,NULL)`,
+      [batchId, product.id, 'LEGACY-REDUCE', 50, 40, 4_500],
+    );
+    await db.run('INSERT INTO stock_balances (product_id,quantity,version) VALUES (?,?,1)', [
+      product.id,
+      40,
+    ]);
+    await db.run(
+      `INSERT INTO stock_movements (id,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,reason)
+      VALUES (?,?,?,'stock_received',50,0,50,'Legacy delivery')`,
+      [crypto.randomUUID(), product.id, batchId],
+    );
+    const operationId = crypto.randomUUID();
+    await db.run(
+      `INSERT INTO stock_movements (id,operation_id,operation_fingerprint,product_id,batch_id,movement_type,quantity,previous_balance,new_balance,reason)
+      VALUES (?,?,NULL,?,?,'correction',-10,50,40,'Recount found fewer packs')`,
+      [crypto.randomUUID(), operationId, product.id, batchId],
+    );
+    const request = {
+      productId: product.id,
+      batchId,
+      movementType: 'correction',
+      direction: 'decrease',
+      quantity: 1,
+      unitId: await unit('pack'),
+      reason: 'Recount found fewer packs',
+      operationId,
+    };
+    const retry = await auth(owner, ownerSession).post('/api/stock/adjust', request);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.movement.operationId).toBe(operationId);
+    expect(retry.body.movement.quantity).toBe(-10);
+    expect(retry.body.product.stockQuantity).toBe(40);
+    expect(await movementCount()).toBe(2);
+    const changed = await auth(owner, ownerSession).post('/api/stock/adjust', {
+      ...request,
+      quantity: 2,
+    });
+    expect(changed.status).toBe(409);
+    expect(changed.body.error.code).toBe('OPERATION_CONFLICT');
+    const wrongDirection = await auth(owner, ownerSession).post('/api/stock/adjust', {
+      ...request,
+      direction: 'increase',
+    });
+    expect(wrongDirection.status).toBe(409);
+    expect(wrongDirection.body.error.code).toBe('OPERATION_CONFLICT');
+    expect(await movementCount()).toBe(2);
+  });
+});

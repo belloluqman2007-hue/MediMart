@@ -285,7 +285,87 @@ const inventoryPermissionsAndReferenceData: Migration = {
   statements,
 };
 
+/**
+ * Version 6 replaces the released `selling_price_kobo >= purchase_cost_kobo` CHECK, which made
+ * an authorised below-cost price impossible, with an authorisation-gated rule enforced by the API.
+ * SQLite cannot drop a CHECK constraint, so `products` is rebuilt with the same columns and one
+ * relaxed condition; every index is recreated and all rows are copied unchanged. Rebuilding
+ * requires foreign-key enforcement to be suspended for the plan (see `migrate`), and integrity is
+ * re-verified with `PRAGMA foreign_key_check` before the transaction commits.
+ */
+const productsRebuilt = `CREATE TABLE products_v6 (
+      ${uuid('id')} PRIMARY KEY,
+      name TEXT NOT NULL CHECK (length(name) BETWEEN 2 AND 160),
+      generic_name TEXT CHECK (generic_name IS NULL OR length(generic_name) <= 160),
+      brand TEXT CHECK (brand IS NULL OR length(brand) <= 120),
+      sku TEXT CHECK (sku IS NULL OR length(sku) BETWEEN 2 AND 64),
+      barcode TEXT CHECK (barcode IS NULL OR length(barcode) BETWEEN 2 AND 64),
+      product_type TEXT NOT NULL CHECK (product_type IN ('medicine','foodstuff','drinks','snacks','general')),
+      category_id TEXT REFERENCES categories(id) ON DELETE RESTRICT,
+      description TEXT CHECK (description IS NULL OR length(description) <= 2000),
+      manufacturer TEXT CHECK (manufacturer IS NULL OR length(manufacturer) <= 160),
+      ${kobo('purchase_cost_kobo')},
+      ${kobo('selling_price_kobo')},
+      reorder_level INTEGER NOT NULL DEFAULT 0 CHECK (typeof(reorder_level) = 'integer' AND reorder_level >= 0),
+      base_unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
+      is_expiry_tracked INTEGER NOT NULL DEFAULT 0 CHECK (is_expiry_tracked IN (0,1)),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+      version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+      ${audited}, ${actor}, deleted_at TEXT
+    ) STRICT`;
+
+const productColumnsInOrder = [
+  'id',
+  'name',
+  'generic_name',
+  'brand',
+  'sku',
+  'barcode',
+  'product_type',
+  'category_id',
+  'description',
+  'manufacturer',
+  'purchase_cost_kobo',
+  'selling_price_kobo',
+  'reorder_level',
+  'base_unit_id',
+  'is_expiry_tracked',
+  'status',
+  'version',
+  'created_at',
+  'updated_at',
+  'created_by',
+  'updated_by',
+  'device_id',
+  'deleted_at',
+].join(',');
+
+const belowCostPricing: Migration = {
+  version: 6,
+  name: 'inventory_below_cost_pricing',
+  requiresForeignKeysOff: true,
+  statements: [
+    // Idempotency beyond product/type/quantity: the canonical fingerprint of the whole movement.
+    `ALTER TABLE stock_movements ADD COLUMN operation_fingerprint TEXT CHECK (operation_fingerprint IS NULL OR (length(operation_fingerprint) = 64 AND operation_fingerprint NOT GLOB '*[^0-9a-f]*'))`,
+    productsRebuilt,
+    `INSERT INTO products_v6 (${productColumnsInOrder}) SELECT ${productColumnsInOrder} FROM products`,
+    'DROP TABLE products',
+    'ALTER TABLE products_v6 RENAME TO products',
+    'CREATE UNIQUE INDEX idx_products_sku ON products(sku) WHERE sku IS NOT NULL AND deleted_at IS NULL',
+    'CREATE UNIQUE INDEX idx_products_barcode ON products(barcode) WHERE barcode IS NOT NULL AND deleted_at IS NULL',
+    'CREATE INDEX idx_products_name ON products(name)',
+    'CREATE INDEX idx_products_category ON products(category_id)',
+    'CREATE INDEX idx_products_type_status ON products(product_type, status)',
+    'CREATE INDEX idx_products_created ON products(created_at, id)',
+    `INSERT INTO permissions (id,code,description) VALUES ('${permissionId(40)}','products.price.below_cost','products: price below cost')`,
+    // Grant identifiers continue after the 62 grants seeded by version 5.
+    `INSERT INTO role_permissions (id,role_id,permission_id) VALUES ('${grantId(63)}','${roleId(roleIndex.owner)}','${permissionId(40)}')`,
+    `INSERT INTO role_permissions (id,role_id,permission_id) VALUES ('${grantId(64)}','${roleId(roleIndex.administrator)}','${permissionId(40)}')`,
+  ],
+};
+
 export const inventoryMigrations: readonly Migration[] = [
   inventoryCore,
   inventoryPermissionsAndReferenceData,
+  belowCostPricing,
 ];
