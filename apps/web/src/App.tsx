@@ -9,6 +9,7 @@ import { Brand, Button } from './components/ui';
 import { Dashboard } from './features/Dashboard';
 import { AuthPage } from './features/AuthPage';
 import { PlaceholderPage } from './features/PlaceholderPage';
+import { BackupSyncPage } from './features/BackupSyncPage';
 import { SettingsPage } from './features/SettingsPage';
 import { InventoryLayout } from './features/inventory/InventoryLayout';
 import { InventoryDashboard } from './features/inventory/InventoryDashboard';
@@ -155,6 +156,7 @@ export function App({ runtime }: { runtime: Runtime }) {
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="debts" element={<DebtsPage />} />
               <Route path="reports" element={<ReportsPage />} />
+              <Route path="backup-sync" element={<BackupSyncPage />} />
               {[
                 'patients',
                 'patients/new',
@@ -190,6 +192,7 @@ export function App({ runtime }: { runtime: Runtime }) {
                       '/prescriptions',
                       '/dispensing',
                       '/patient-reports',
+                      '/backup-sync',
                     ].includes(item.path),
                 )
                 .map((item) => (

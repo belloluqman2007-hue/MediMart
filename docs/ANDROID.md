@@ -1,4 +1,8 @@
-# Android foundation and verification gate
+# MediMart on an Android phone
+
+This page is written so a shop owner can install and use the phone application, and so a developer
+can rebuild it. The verification table states exactly what has been checked, because "the code is
+there" and "the APK works on a phone" are different claims.
 
 ## Current status
 
@@ -10,7 +14,7 @@ The sandbox has Node/npm and native Node build tools but no Java, Android SDK, A
 | ----------------------------------- | -------------------------------------------------------- |
 | Permanent app ID / Java namespace   | `com.medimart.app`                                       |
 | App name                            | `MediMart`                                               |
-| App version                         | `0.1.0`, versionCode 1                                   |
+| App version                         | `0.2.0`, versionCode 2                                   |
 | Capacitor core / Android / CLI      | 8.6.0                                                    |
 | Native SQLite plugin                | `@capacitor-community/sqlite` 8.1.1                      |
 | Native secure storage               | `@aparajita/capacitor-secure-storage` 8.0.1              |
@@ -47,13 +51,26 @@ npm run android:open
 
 `android:sync` builds the production frontend, adds the public shell cache, and copies local assets/plugin configuration into the existing Android shell. It never replaces the permanent application ID or adds a remote startup URL.
 
-Build on a properly provisioned machine:
+Build on a properly provisioned machine. The convenience script builds the assets, runs Gradle,
+checks the package identifier and copies the result to `dist/android/`:
 
 ```bash
+ANDROID_HOME=$HOME/Android/Sdk node scripts/build-apk.mjs --profile debug
+```
+
+Or run Gradle directly:
+
+```bash
+npm run android:sync            # ---- or: npm run android:sync:dev for cleartext LAN testing
 cd apps/web/android
 ./gradlew --no-daemon assembleDebug
 # Windows: gradlew.bat --no-daemon assembleDebug
 ```
+
+`scripts/build-apk.mjs` fails loudly and explains what is missing if the JDK or SDK is absent; it
+never reports an APK it did not produce. Release signing reads the keystore and passwords from
+`MEDIMART_STORE_FILE`, `MEDIMART_STORE_PASSWORD`, `MEDIMART_KEY_ALIAS` and `MEDIMART_KEY_PASSWORD` at
+build time. Keystores (`*.jks`, `*.keystore`) and APKs are git-ignored; never commit them.
 
 Expected APK path **only after a successful build**:
 
@@ -81,6 +98,67 @@ The generated Capacitor example tests were removed. A device-side `AppIdentityTe
 This identity/manifest smoke check does not replace the physical-device encryption, offline and recovery checklist below.
 
 A manual **Android debug verification** workflow under `.github/workflows/android.yml` installs the SDK, compiles the debug application/device-test harness, checks the app APK identifier, and uploads a temporary artifact. It has **not been run here**. A successful future workflow is evidence of compilation/package-ID verification, not on-device offline/security testing.
+
+## Installing the APK on a shop phone (non-programmer steps)
+
+1. Get the file `medimart-debug.apk` (or `medimart-release.apk`) and put it on the phone: send it to
+   yourself by USB cable, Bluetooth, or a file-sharing app you already trust.
+2. On the phone open **Settings → Apps → Special access → Install unknown apps**, and allow the app
+   you are using to open the file (Files, Chrome, WhatsApp…). Android requires this for anything not
+   downloaded from Play Store.
+3. Tap the APK file and choose **Install**. If Chrome warns "this type of file can harm your device",
+   choose **OK** — that warning appears for every APK downloaded outside Play Store.
+4. Open **MediMart** from the app drawer. First start creates the encrypted local database.
+5. Follow [Connect a phone to the shop computer](#connect-a-phone-to-the-shop-computer) below.
+
+The phone app asks for only two things: network access (to reach the shop computer) and — only when
+you tap **Camera** on the point-of-sale screen — the camera, to read a barcode. It never asks for
+location, contacts, storage-wide access, SMS or the ability to run in the background.
+
+### Camera barcode scanning
+
+Tap **Camera** next to the scan field on the point-of-sale screen. The phone asks for camera
+permission the first time; allow it. Point the camera at the barcode. The decoded number is added to
+the cart exactly as if you had typed it, and the camera closes.
+
+- Nothing is saved, uploaded or logged. Only the decoded number leaves the scanner.
+- Not every Android phone can decode barcodes from the camera. If yours cannot, MediMart says so and
+  you keep using the scan field, a Bluetooth/USB scanner, or the on-screen search.
+- A phone without a camera can still install and run MediMart; the camera is declared optional.
+
+## Connect a phone to the shop computer
+
+1. The Windows computer must be running MediMart (see [DESKTOP.md](DESKTOP.md)) and both devices must
+   be on the same Wi-Fi router. Internet is not needed.
+2. On the computer open **Settings → Connection & storage** and note the address, for example
+   `https://192.168.1.20:4780`.
+3. On the phone open **Settings → Connection & storage**, type that address, name the phone (e.g.
+   "Counter phone"), and request a pairing code.
+4. On the computer open **Settings → Device pairing**, check the phone name, and type the eight-digit
+   code.
+5. On the phone tap **Check approval**, then sign in with that person's own staff account.
+
+Codes expire after ten minutes. An approved phone still needs a real staff login; the device alone
+grants nothing. If a phone is lost, revoke it on the computer: it keeps the records already captured
+on it but can no longer push anything, and it is refused with a session error.
+
+## Working without a connection
+
+When the phone cannot reach the shop computer (Wi-Fi dropped, computer asleep, router restarted):
+
+- The point of sale offers **Keep sale on this device** instead of failing. The sale is written to the
+  phone's own encrypted database with a provisional receipt number such as `OFF-20261110-0001`.
+- **Backup and Sync** on the phone lists everything waiting, and **Synchronize now** sends it when the
+  connection returns. MediMart also tries automatically when a signed-in session reconnects.
+- The shop computer re-checks every kept record before it counts: the device fingerprint, the device
+  state, the clock, the stock, the price and the permissions. Anything it cannot verify is rejected or
+  parked as a conflict and listed for a human to review — never forced through.
+- Sending the same record twice is safe: the second attempt is recognised as a duplicate and changes
+  nothing.
+- Deliberate restrictions: credit sales, unverified discounts and prescriptions cannot be completed
+  offline, because they need an online decision that the phone cannot make safely.
+
+---
 
 ## Native storage lifecycle
 

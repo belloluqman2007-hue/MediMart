@@ -7,8 +7,8 @@ android {
         applicationId "com.medimart.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode 2
+        versionName "0.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -20,6 +20,31 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            /*
+             * Signing is supplied at build time and never committed. The workflow reads a keystore
+             * from a repository secret; the keystore and its passwords are git-ignored (*.jks,
+             * *.keystore). Without these variables a release build is unsigned, and the build
+             * script refuses to present it as installable.
+             */
+            if (project.hasProperty('MEDIMART_STORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+    signingConfigs {
+        release {
+            if (project.hasProperty('MEDIMART_STORE_FILE')) {
+                storeFile file(project.property('MEDIMART_STORE_FILE'))
+                storePassword project.property('MEDIMART_STORE_PASSWORD')
+                keyAlias project.property('MEDIMART_KEY_ALIAS')
+                keyPassword project.property('MEDIMART_KEY_PASSWORD')
+            }
+        }
+    }
+    packagingOptions {
+        // Keep the bundled size down on a low-storage phone.
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 }

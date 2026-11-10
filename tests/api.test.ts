@@ -22,6 +22,10 @@ const config: ApiConfig = {
   trustProxyHops: 0,
   sessionHours: 8,
   secureCookies: false,
+  backupDir: '.artifacts/backups',
+  managedDesktop: false,
+  desktopOrigins: [],
+  allowLanHttp: false,
 };
 const ownerBody = {
   fullName: 'Test Owner',
@@ -413,7 +417,7 @@ describe('authorization and API boundaries', () => {
     const health = await request(app).get('/api/health');
     expect(health.status).toBe(200);
     expect(health.headers['cache-control']).toBe('no-store');
-    expect(health.body.sync).toBe('not_implemented');
+    expect(health.body.sync).toBe('offline_capture');
   });
   it('rate limits expensive authentication attempts', async () => {
     for (let i = 0; i < 10; i++)

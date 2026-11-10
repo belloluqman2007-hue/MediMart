@@ -127,6 +127,13 @@ export const operationSchema = z
         'expense_categories',
         'expense_reversal',
         'expense_reversals',
+        // Phase 6 offline capture and backup bookkeeping are infrastructure, never business outbox rows.
+        'offline_record',
+        'offline_records',
+        'backup_record',
+        'backup_records',
+        'backup_setting',
+        'backup_settings',
       ].includes(op.entityType)
     ) {
       ctx.addIssue({

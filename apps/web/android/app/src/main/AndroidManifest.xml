@@ -11,6 +11,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:hardwareAccelerated="true"
         android:theme="@style/AppTheme">
 
         <activity
@@ -19,6 +20,7 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
 
             <intent-filter>
@@ -39,8 +41,15 @@
         </provider>
     </application>
 
-    <!-- Permissions -->
-
+    <!--
+      Permissions are intentionally minimal:
+      - INTERNET / ACCESS_NETWORK_STATE: reach the shop computer on the local network.
+      - CAMERA: only the barcode/QR scanner, requested at runtime when the clerk taps "Camera".
+      No location, contacts, storage-wide, SMS or background-service permissions are declared.
+    -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 </manifest>

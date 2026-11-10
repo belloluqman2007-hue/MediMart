@@ -20,6 +20,10 @@ const config: ApiConfig = {
   trustProxyHops: 0,
   sessionHours: 8,
   secureCookies: false,
+  backupDir: '.artifacts/backups',
+  managedDesktop: false,
+  desktopOrigins: [],
+  allowLanHttp: false,
   // The browser suite signs in once per scenario; keep the 10-per-15-minute production default out of its way.
   authRateLimit: 200,
 };

@@ -138,6 +138,37 @@ export function AppProvider({ runtime, children }: { runtime: Runtime; children:
     const timer = setTimeout(() => setToast(null), 6500);
     return () => clearTimeout(timer);
   }, [toast]);
+  /**
+   * Send parked offline records as soon as this device is signed in, native, and online.
+   * The push is idempotent, so a reconnect storm cannot double-apply anything; a failure is
+   * reported once and the records remain pending.
+   */
+  const syncing = useRef(false);
+  useEffect(() => {
+    if (!runtime.native || !session || connection !== 'online') return;
+    if (syncing.current) return;
+    let active = true;
+    syncing.current = true;
+    void import('../platform/offline')
+      .then(async ({ localOfflineSummary, pushOfflineRecords }) => {
+        const pending = await localOfflineSummary(runtime);
+        if (!active || pending.pending === 0) return;
+        const outcome = await pushOfflineRecords(runtime, api);
+        if (!active || outcome.sent === 0) return;
+        notify(
+          `${outcome.applied + outcome.duplicates} offline record(s) synchronized${outcome.rejected ? `, ${outcome.rejected} need attention` : ''}.`,
+          outcome.rejected ? 'info' : 'success',
+        );
+        await refresh();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        syncing.current = false;
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, connection, notify, refresh, runtime, session]);
   const value: AppContextValue = {
     runtime,
     api,

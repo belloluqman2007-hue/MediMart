@@ -168,6 +168,8 @@ export const rolePermissions: Record<RoleCode, readonly Permission[]> = {
     'patients.view',
     'prescriptions.view',
     'prescriptions.dispense',
+    'sync.view',
+    'sync.manage',
   ],
   healthcare_professional: [
     ...basic,
@@ -175,6 +177,7 @@ export const rolePermissions: Record<RoleCode, readonly Permission[]> = {
     'patients.register',
     'patients.edit',
     'patients.reports',
+    'sync.view',
     'consultations.view',
     'consultations.create',
     'vitals.record',
@@ -193,6 +196,9 @@ export const rolePermissions: Record<RoleCode, readonly Permission[]> = {
     'customers.view',
     'customers.manage',
     'cash_register.view',
+    // Phase 6: park sales while the shop computer is unreachable, then synchronize them.
+    'sync.view',
+    'sync.manage',
   ],
   storekeeper: [
     ...basic,
@@ -215,6 +221,8 @@ export const rolePermissions: Record<RoleCode, readonly Permission[]> = {
     'suppliers.view',
     'suppliers.manage',
     'minimart.view',
+    'sync.view',
+    'sync.manage',
   ],
 };
 export function hasPermission(granted: readonly string[], permission: Permission): boolean {
