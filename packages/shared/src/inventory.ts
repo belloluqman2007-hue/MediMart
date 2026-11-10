@@ -108,6 +108,11 @@ export const productUnitInputSchema = z.strictObject({
     .min(1, 'A conversion factor must be at least 1.')
     .max(1_000_000, 'Conversion factor is too large.'),
 });
+/**
+ * `allowBelowCost` is the caller's explicit acknowledgement that the selling price is below the
+ * purchase cost. It never grants authority on its own: the API additionally requires the
+ * `products.price.below_cost` permission and records the decision in the audit log.
+ */
 export const productInputSchema = z
   .strictObject({
     name: text(2, 160),
@@ -126,10 +131,11 @@ export const productInputSchema = z
     isExpiryTracked: z.boolean(),
     status: z.enum(productStatuses).default('active'),
     units: z.array(productUnitInputSchema).max(20).default([]),
+    allowBelowCost: z.boolean().default(false),
   })
   .refine(
-    (value) => value.sellingPriceKobo >= value.purchaseCostKobo,
-    'The selling price cannot be below the purchase cost.',
+    (value) => value.allowBelowCost || value.sellingPriceKobo >= value.purchaseCostKobo,
+    'The selling price cannot be below the purchase cost without permission.',
   )
   .refine(
     (value) => !value.sku || value.sku.toUpperCase() !== value.barcode?.toUpperCase(),

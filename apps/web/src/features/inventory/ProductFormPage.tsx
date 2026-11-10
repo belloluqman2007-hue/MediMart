@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Plus, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react';
 import {
   hasPermission,
   productInputSchema,
@@ -123,6 +123,13 @@ function ProductForm({
   const permitted = Boolean(
     user && hasPermission(user.permissions, editing ? 'products.edit' : 'products.create'),
   );
+  const mayPriceBelowCost = Boolean(
+    user && hasPermission(user.permissions, 'products.price.below_cost'),
+  );
+  const enteredCostKobo = nairaToKobo(form.purchaseCost);
+  const enteredPriceKobo = nairaToKobo(form.sellingPrice);
+  const belowCost =
+    enteredCostKobo !== null && enteredPriceKobo !== null && enteredPriceKobo < enteredCostKobo;
   const baseUnit = units.find((unit) => unit.id === form.baseUnitId);
   const availableUnits = useMemo(
     () => units.filter((unit) => unit.id !== form.baseUnitId),
@@ -176,6 +183,7 @@ function ProductForm({
       units: form.conversions
         .filter((conversion) => conversion.unitId && conversion.factor)
         .map((conversion) => ({ unitId: conversion.unitId, factor: Number(conversion.factor) })),
+      allowBelowCost: belowCost,
     });
     if (!parsed.success) {
       const next: Record<string, string[]> = {};
@@ -400,6 +408,19 @@ function ProductForm({
             <span>Selling {formatMoney(nairaToKobo(form.sellingPrice) ?? 0)}</span>
             {baseUnit && <span>Base unit: {baseUnit.name}</span>}
           </div>
+          {belowCost && (
+            <div className="info-box warning" role="alert">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>This selling price is below the purchase cost.</strong>
+                <p>
+                  {mayPriceBelowCost
+                    ? `Each base unit would be sold ${formatMoney((enteredCostKobo ?? 0) - (enteredPriceKobo ?? 0))} below cost. Saving is recorded in the audit log.`
+                    : 'Your account needs products.price.below_cost to do this. Raise the selling price or ask the owner.'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="form-section">
@@ -465,7 +486,7 @@ function ProductForm({
           <Link className="button button-secondary" to="/inventory/products">
             Cancel
           </Link>
-          <Button type="submit" busy={busy}>
+          <Button type="submit" busy={busy} disabled={belowCost && !mayPriceBelowCost}>
             <Save size={16} /> {editing ? 'Save changes' : 'Add product'}
           </Button>
         </div>

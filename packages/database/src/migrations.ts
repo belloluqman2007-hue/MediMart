@@ -5,6 +5,12 @@ export interface Migration {
   version: number;
   name: string;
   statements: readonly string[];
+  /**
+   * Set when the migration rebuilds a table that other tables reference (SQLite cannot drop a
+   * CHECK constraint in place). Foreign-key enforcement is suspended for the plan and
+   * `PRAGMA foreign_key_check` must still pass before the transaction commits.
+   */
+  requiresForeignKeysOff?: boolean;
 }
 export const ledgerSql = `CREATE TABLE IF NOT EXISTS database_migrations (
   ${uuid('id')} PRIMARY KEY, version INTEGER NOT NULL UNIQUE CHECK (version > 0),

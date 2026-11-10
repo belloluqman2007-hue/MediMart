@@ -1,6 +1,9 @@
 import { sha256 } from '@medimart/shared';
 import type { Database } from './connection';
 import { ledgerSql, migrations, type Migration } from './migrations';
+/** PRAGMA foreign_keys is a no-op inside a transaction, so migrations that rebuild a referenced table toggle it around the transaction. */
+const setForeignKeys = (database: Database, enabled: boolean) =>
+  database.run(`PRAGMA foreign_keys = ${enabled ? 'ON' : 'OFF'}`);
 export async function migrate(
   database: Database,
   plan: readonly Migration[] = migrations,
@@ -10,6 +13,35 @@ export async function migrate(
   const checksums = await Promise.all(
     plan.map((m) => sha256(`${m.version}\n${m.name}\n${m.statements.join('\n')}\n`)),
   );
+  // A migration that rebuilds a referenced table must run with enforcement suspended; the plan
+  // still verifies integrity with PRAGMA foreign_key_check before it commits.
+  const pending = await pendingMigrations(database, plan.length);
+  const suspend = plan.slice(pending).some((migration) => migration.requiresForeignKeysOff);
+  if (suspend) await setForeignKeys(database, false);
+  try {
+    await runPlan(database, plan, checksums);
+  } finally {
+    if (suspend) await setForeignKeys(database, true);
+  }
+}
+
+/** How many migrations the database has already applied (0 when the ledger does not exist). */
+async function pendingMigrations(database: Database, total: number) {
+  try {
+    const rows = await database.all<{ version: number }>(
+      'SELECT version FROM database_migrations ORDER BY version',
+    );
+    return rows.length > total ? total : rows.length;
+  } catch {
+    return 0;
+  }
+}
+
+async function runPlan(
+  database: Database,
+  plan: readonly Migration[],
+  checksums: readonly string[],
+) {
   await database.transaction(async (tx) => {
     await tx.run(ledgerSql);
     const applied = await tx.all<{ version: number; name: string; checksum: string }>(

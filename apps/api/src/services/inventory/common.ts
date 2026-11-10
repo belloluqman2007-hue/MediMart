@@ -43,6 +43,7 @@ export type ProductRow = {
 export type MovementRow = {
   id: string;
   operation_id: string | null;
+  operation_fingerprint: string | null;
   product_id: string;
   product_name: string;
   batch_id: string | null;
@@ -54,6 +55,7 @@ export type MovementRow = {
   unit_cost_kobo: number | null;
   reason: string;
   reference_id: string | null;
+  supplier_id: string | null;
   user_id: string | null;
   user_name: string | null;
   device_id: string | null;
