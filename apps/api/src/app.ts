@@ -23,6 +23,7 @@ import { AuthService, requireActiveContext } from './services/auth';
 import { DeviceService } from './services/devices';
 import { csrfForToken } from './services/crypto';
 import { audit } from './services/audit';
+import { registerFinanceRoutes } from './routes/finance';
 import { registerInventoryRoutes } from './routes/inventory';
 import { registerSalesRoutes } from './routes/sales';
 import { readShopSettings, writeShopSettings } from './services/sales/common';
@@ -119,7 +120,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   }
   app.get('/api/health', async (_req, res) => {
     await db.all('SELECT 1');
-    res.json({ status: 'ok', database: 'ready', phase: 3, sync: 'not_implemented' });
+    res.json({ status: 'ok', database: 'ready', phase: 5, sync: 'not_implemented' });
   });
   app.get('/api/auth/bootstrap-status', async (_req, res) => {
     res.json(await auth.bootstrapStatus());
@@ -281,6 +282,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   });
   registerInventoryRoutes(app, db, auth);
   registerSalesRoutes(app, db, auth);
+  registerFinanceRoutes(app, db, auth);
   app.use('/api', () => {
     throw new ApiError(404, 'NOT_FOUND', 'This API endpoint does not exist.');
   });

@@ -35,9 +35,9 @@ State-changing origin checks apply independently of permissions. No frontend nav
 | `GET /audit-logs?limit=50`   | `audit.view`                                              | Read up to 100 immutable event records                              |
 | `GET /sync/status`           | `sync.view`                                               | Pending central queue count and explicit `implemented: false`       |
 
-No sales, POS, debts, purchase orders, supplier payments, prescriptions, patients, financial
-posting, backup execution, or push/pull sync endpoints exist. Unknown API paths return a JSON 404,
-not the SPA HTML.
+Sales/POS, debts, purchasing, goods receiving, supplier payments, expenses and financial reporting
+endpoints exist (Phases 3 and 5). Prescriptions, patients, backup execution and push/pull sync
+endpoints do not. Unknown API paths return a JSON 404, not the SPA HTML.
 
 ## Inventory endpoints (Phase 2)
 
@@ -71,6 +71,44 @@ not the SPA HTML.
 Receiving and adjustment payloads carry an `operationId` (client UUID) plus optional `deviceId`.
 Replaying the identical operation returns the stored movement instead of duplicating stock; reusing
 the ID for different content returns `409 OPERATION_CONFLICT`.
+
+## Purchasing, supplier payments, expenses and finance endpoints (Phase 5)
+
+All routes require an authenticated session and the listed permission; service transactions re-check
+the grant. Amounts are integer kobo.
+
+| Method / path                         | Permission                              | Purpose                                     |
+| ------------------------------------- | --------------------------------------- | ------------------------------------------- |
+| `GET /purchases`                      | `purchases.view`                        | Search/filter purchase orders               |
+| `POST /purchases`                     | `purchases.create`                      | Create a draft or ordered purchase          |
+| `GET /purchases/:id`                  | `purchases.view`                        | Detail with lines, receipts and payments    |
+| `PUT /purchases/:id`                  | `purchases.edit`                        | Edit a draft with a version check           |
+| `POST /purchases/:id/order`           | `purchases.edit`                        | Mark a draft as ordered                     |
+| `POST /purchases/:id/cancel`          | `purchases.cancel`                      | Cancel with a mandatory reason              |
+| `GET /purchases/:id/receipts`         | `purchases.view`                        | Receipts for one order                      |
+| `GET /goods-receipts` · `/:id`        | `purchases.view`                        | Delivery history and detail                 |
+| `POST /purchases/:id/receipts`        | `purchases.receive` (+ `stock.receive`) | Atomic receipt, stock movements and batches |
+| `GET /suppliers/:id/account`          | `supplier_debts.view`                   | Balances, invoices, payments and statement  |
+| `GET /suppliers/:id/statement`        | `supplier_debts.view`                   | Date-ranged running statement               |
+| `GET /supplier-balances`              | `supplier_debts.view`                   | Supplier balance list                       |
+| `GET /supplier-payments` · `/:id`     | `supplier_payments.view`                | Payment history and detail                  |
+| `POST /supplier-payments`             | `supplier_payments.record`              | Record a payment and allocations            |
+| `POST /supplier-payments/:id/reverse` | `supplier_payments.reverse`             | Append a reversal record                    |
+| `GET /expense-categories`             | `expenses.view`                         | Seeded operating categories                 |
+| `GET /expenses` · `/:id`              | `expenses.view`                         | Expense list and detail                     |
+| `POST /expenses`                      | `expenses.create`                       | Create a draft or recorded expense          |
+| `PUT /expenses/:id`                   | `expenses.edit`                         | Edit a draft with a version check           |
+| `POST /expenses/:id/record`           | `expenses.edit`                         | Post a draft expense                        |
+| `POST /expenses/:id/reverse`          | `expenses.reverse`                      | Reverse a recorded expense                  |
+| `GET /finance/dashboard`              | `reports.view`                          | Financial overview for a date range         |
+| `GET /reports/finance`                | `reports.view`                          | Full separated financial report             |
+| `GET /reports/finance/export`         | `reports.export`                        | CSV export for 12 report types              |
+| `GET /cash-register`                  | `cash_register.view`                    | Sales-side money movement                   |
+
+Purchase and expense updates carry a `version`; a stale version returns `409`. Purchase,
+receipt, payment, reversal and expense writes carry an `operationId`; replaying the same payload is
+idempotent, while a changed payload returns `409 OPERATION_CONFLICT`. Corrections to payments and
+recorded expenses use reversal records, never deletes.
 
 ## Main payload shapes
 

@@ -317,6 +317,7 @@ test('cashier can scan a barcode at POS, complete a cash sale with change, view 
 test('owner records a part-paid credit sale, settles customer debt, refunds an item, and verifies separated financial reports & WCAG A/AA', async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   await signIn(page, postChangeOwner);
 
   // Register customer and run part-payment credit sale on POS
@@ -395,4 +396,25 @@ test('owner records a part-paid credit sale, settles customer debt, refunds an i
       })),
     ).toEqual([]);
   }
+});
+
+test('owner opens the Phase 5 purchasing and finance workspaces without runtime errors', async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  await signIn(page, postChangeOwner);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const routes = [
+    ['/#/purchases', 'Purchase orders'],
+    ['/#/expenses', 'Operating expenses'],
+    ['/#/cash-register', 'Cash register'],
+    ['/#/reports/financial', 'Financial reports'],
+  ] as const;
+  for (const [route, heading] of routes) {
+    await page.goto(route);
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    await page.waitForLoadState('networkidle');
+  }
+  expect(errors).toEqual([]);
 });

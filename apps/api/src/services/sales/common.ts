@@ -57,7 +57,7 @@ export async function writeShopSettings(
  */
 export async function nextSequenceCode(
   tx: SqlExecutor,
-  prefix: 'MM' | 'REV' | 'DP' | 'CUST',
+  prefix: 'MM' | 'REV' | 'DP' | 'CUST' | 'PO' | 'GRN' | 'SP' | 'EXP',
   counterDate: string = todayIso(),
   padLength = 4,
 ): Promise<string> {

@@ -10,13 +10,18 @@ Both adapters enable foreign keys, WAL, `synchronous=FULL`, and a 5-second busy 
 
 `packages/database/src/migrations.ts` defines ordered SQL statements shared by both runtimes. A transactional bootstrap creates `database_migrations`, then applies:
 
-| Version | Name                                    | Responsibility                                                                                                        |
-| ------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 1       | `identity_security_and_settings`        | Accounts, RBAC, devices, sessions, audit, application settings and indexes                                            |
-| 2       | `offline_outbox_receipts_and_conflicts` | Per-device cursors, durable operations, receipts, conflict evidence and indexes                                       |
-| 3       | `least_privilege_role_seeds`            | Seven roles, 25 permission codes, explicit grants; **no user accounts**                                               |
-| 4       | `inventory_core`                        | Products, categories, units, suppliers, batches, balances, ledger, adjustments; 17 indexes and 4 append-only triggers |
-| 5       | `inventory_seeds`                       | 14 inventory permissions, role grants, 11 units and 11 example categories                                             |
+| Version | Name                                                  | Responsibility                                                                                                         |
+| ------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 1       | `identity_security_and_settings`                      | Accounts, RBAC, devices, sessions, audit, application settings and indexes                                             |
+| 2       | `offline_outbox_receipts_and_conflicts`               | Per-device cursors, durable operations, receipts, conflict evidence and indexes                                        |
+| 3       | `least_privilege_role_seeds`                          | Seven roles, 25 permission codes, explicit grants; **no user accounts**                                                |
+| 4       | `inventory_core`                                      | Products, categories, units, suppliers, batches, balances, ledger, adjustments; 17 indexes and 4 append-only triggers  |
+| 5       | `inventory_seeds`                                     | 14 inventory permissions, role grants, 11 units and 11 example categories                                              |
+| 6       | `inventory_below_cost_pricing`                        | Owner-level below-cost pricing permission and schema rebuild                                                           |
+| 7       | `sales_pos_payments_and_debts`                        | Customers, sales, sale lines, allocations, payments, refunds/voids, debts and debt repayments                          |
+| 8       | `sales_permissions_and_role_grants`                   | POS, discount, refund, debt and reporting permissions and grants                                                       |
+| 9       | `purchasing_receiving_supplier_payments_and_expenses` | Purchase orders/lines, goods receipts/lines, supplier payments/allocations, expense categories, expenses and reversals |
+| 10      | `finance_permissions_and_expense_categories`          | 12 Phase 5 permissions, role grants and 12 operating expense categories                                                |
 
 The entire pending plan runs in a serialized `BEGIN IMMEDIATE` transaction. Each ledger entry has a UUID, version, name, SHA-256 checksum, and application timestamp. The runner checks contiguous versions, names and checksums, rejects newer/unknown databases, and checks foreign-key integrity before commit. Failed DDL and ledger writes roll back together.
 
@@ -61,10 +66,28 @@ All stored timestamps are UTC ISO-8601 strings. Mutating services explicitly upd
 | `stock_movements`   | Append-only ledger with `CHECK (new_balance = previous_balance + quantity)`, unique `operation_id`, reason, user, device and reference IDs                                               |
 | `stock_adjustments` | One row per adjustment with direction, reason and permission evidence                                                                                                                    |
 
-Total: **23 tables**. Money columns are INTEGER kobo; quantities are INTEGER base units. The ledger
-is the source of truth and `stock_balances` is a cache verified by `/api/inventory/reconciliation`.
-Migrations v4/v5 only add objects and rows, so applying them to an existing Phase 1 database
-preserves every existing record.
+## Sales tables (Phase 3, 10 tables)
+
+`customers`, `sales`, `sale_items`, `sale_item_allocations`, `sale_payments`, `sale_reversals`,
+`sale_reversal_items`, `customer_debts`, `debt_payments` and `receipt_counters`. Sales store
+integer-kobo totals and COGS; payments and reversals are append-only. Unpaid credit is never cash.
+
+## Finance tables (Phase 5, 9 tables)
+
+`purchase_orders`, `purchase_order_items`, `goods_receipts`, `goods_receipt_items`,
+`supplier_payments`, `supplier_payment_allocations`, `expense_categories`, `expenses` and
+`expense_reversals`.
+
+- A purchase order is a commitment, not stock and not a payable. Lines carry a purchase-unit
+  snapshot, conversion factor, integer base quantity, cost and received base quantity.
+- Goods receipt lines link to the existing stock ledger through `stock_movement_id`; a receipt
+  cannot be duplicated for the same purchase line and accepted quantity is capped by the order.
+- Supplier payments and their allocations are append-only. A reversal is a new payment row with
+  `payment_kind = 'reversal'` and reversed (not deleted) allocations.
+- Expenses are versioned and cannot be deleted. Reversals are separate append-only records.
+- All money is INTEGER kobo; all quantities are INTEGER base units. Total: **42 tables**.
+- The stock ledger remains the source of truth and `stock_balances` remains a cache verified by
+  `/api/inventory/reconciliation`. Migrations 4–10 are forward-only and preserve existing records.
 
 ## Queue and conflict contract
 

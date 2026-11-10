@@ -31,6 +31,17 @@ import { CustomersPage } from './features/sales/CustomersPage';
 import { CustomerDetailPage } from './features/sales/CustomerDetailPage';
 import { DebtsPage } from './features/sales/DebtsPage';
 import { ReportsPage } from './features/sales/ReportsPage';
+import { PurchasesPage } from './features/finance/PurchasesPage';
+import { PurchaseFormPage } from './features/finance/PurchaseFormPage';
+import { PurchaseDetailPage } from './features/finance/PurchaseDetailPage';
+import { ReceiveGoodsPage } from './features/finance/ReceiveGoodsPage';
+import { GoodsReceiptsPage } from './features/finance/GoodsReceiptsPage';
+import { SupplierAccountPage } from './features/finance/SupplierAccountPage';
+import { SupplierPaymentsPage } from './features/finance/SupplierPaymentsPage';
+import { SupplierBalancesPage } from './features/finance/SupplierBalancesPage';
+import { ExpensesPage } from './features/finance/ExpensesPage';
+import { CashRegisterPage } from './features/finance/CashRegisterPage';
+import { FinancialReportsPage } from './features/finance/FinancialReportsPage';
 import { navigation } from './lib/navigation';
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -106,9 +117,33 @@ export function App({ runtime }: { runtime: Runtime }) {
                 <Route path="movements" element={<MovementsPage />} />
                 <Route path="units" element={<UnitsPage />} />
                 <Route path="suppliers" element={<SuppliersPage />} />
+                <Route path="suppliers/:id/account" element={<SupplierAccountPage />} />
+                <Route path="purchases" element={<PurchasesPage />} />
+                <Route path="purchases/new" element={<PurchaseFormPage />} />
+                <Route path="purchases/receipts" element={<GoodsReceiptsPage />} />
+                <Route path="purchases/:id" element={<PurchaseDetailPage />} />
+                <Route path="purchases/:id/edit" element={<PurchaseFormPage />} />
+                <Route path="purchases/:id/receive" element={<ReceiveGoodsPage />} />
+                <Route path="supplier-payments" element={<SupplierPaymentsPage />} />
+                <Route path="supplier-balances" element={<SupplierBalancesPage />} />
+                <Route path="expenses" element={<ExpensesPage />} />
+                <Route path="cash-register" element={<CashRegisterPage />} />
+                <Route path="reports/financial" element={<FinancialReportsPage />} />
                 <Route path="reconciliation" element={<ReconciliationPage />} />
               </Route>
               <Route path="suppliers" element={<SuppliersPage />} />
+              <Route path="suppliers/:id/account" element={<SupplierAccountPage />} />
+              <Route path="purchases" element={<PurchasesPage />} />
+              <Route path="purchases/new" element={<PurchaseFormPage />} />
+              <Route path="purchases/receipts" element={<GoodsReceiptsPage />} />
+              <Route path="purchases/:id" element={<PurchaseDetailPage />} />
+              <Route path="purchases/:id/edit" element={<PurchaseFormPage />} />
+              <Route path="purchases/:id/receive" element={<ReceiveGoodsPage />} />
+              <Route path="supplier-payments" element={<SupplierPaymentsPage />} />
+              <Route path="supplier-balances" element={<SupplierBalancesPage />} />
+              <Route path="expenses" element={<ExpensesPage />} />
+              <Route path="cash-register" element={<CashRegisterPage />} />
+              <Route path="reports/financial" element={<FinancialReportsPage />} />
               <Route path="pos" element={<PosLayout />}>
                 <Route index element={<PosTerminalPage />} />
                 <Route path="sales" element={<SalesHistoryPage />} />
@@ -131,6 +166,9 @@ export function App({ runtime }: { runtime: Runtime }) {
                       '/customers',
                       '/debts',
                       '/reports',
+                      '/purchases',
+                      '/expenses',
+                      '/cash-register',
                     ].includes(item.path),
                 )
                 .map((item) => (

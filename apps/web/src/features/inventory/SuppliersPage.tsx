@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Eye, Pencil, Plus, Power, Truck } from 'lucide-react';
+import { Eye, Pencil, Plus, Power, Truck, Wallet } from 'lucide-react';
 import {
   hasPermission,
   type Paginated,
@@ -47,6 +47,7 @@ export function SuppliersPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const canManage = Boolean(user && hasPermission(user.permissions, 'suppliers.manage'));
+  const canSeeAccount = Boolean(user && hasPermission(user.permissions, 'supplier_debts.view'));
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(search), 300);
@@ -210,6 +211,16 @@ export function SuppliersPage() {
                           >
                             <Eye size={15} />
                           </button>
+                          {canSeeAccount && (
+                            <Link
+                              className="icon-button"
+                              to={`/suppliers/${supplier.id}/account`}
+                              aria-label={`Open account for ${supplier.name}`}
+                              title="Supplier account, invoices and payments"
+                            >
+                              <Wallet size={15} />
+                            </Link>
+                          )}
                           {canManage && (
                             <>
                               <button
@@ -369,6 +380,16 @@ export function SuppliersPage() {
           <ErrorBlock message={detail.error} onRetry={detail.reload} />
         ) : detail.data ? (
           <div className="supplier-detail">
+            {canSeeAccount && (
+              <div className="button-row">
+                <Link
+                  className="button button-secondary"
+                  to={`/suppliers/${detail.data.id}/account`}
+                >
+                  <Wallet size={15} /> Open supplier account
+                </Link>
+              </div>
+            )}
             <p className="muted small">
               {[detail.data.contactPerson, detail.data.phone, detail.data.email]
                 .filter(Boolean)
