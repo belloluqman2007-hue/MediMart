@@ -9,6 +9,7 @@ import {
   type MovementRow,
   type ProductRow,
 } from './common';
+import { stockValuationTotals } from './valuation';
 
 export async function inventoryDashboard(
   db: SqlExecutor,
@@ -19,20 +20,17 @@ export async function inventoryDashboard(
   cutoff.setUTCDate(cutoff.getUTCDate() + expiryDays);
   const alertCutoff = cutoff.toISOString().slice(0, 10);
 
+  // Stock quantity, cost value and retail value all come from the shared, batch-aware valuation
+  // (`services/inventory/valuation.ts`) so the dashboard cannot drift from the financial reports.
+  const valuation = await stockValuationTotals(db);
   const totals = (
     await db.all<{
       active_products: number;
       inactive_products: number;
-      stock_quantity: number;
-      cost_value: number;
-      retail_value: number;
     }>(
       `SELECT
         (SELECT COUNT(*) FROM products WHERE deleted_at IS NULL AND status='active') AS active_products,
-        (SELECT COUNT(*) FROM products WHERE deleted_at IS NULL AND status='inactive') AS inactive_products,
-        COALESCE((SELECT SUM(b.quantity) FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE p.deleted_at IS NULL), 0) AS stock_quantity,
-        COALESCE((SELECT SUM(b.quantity * p.purchase_cost_kobo) FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE p.deleted_at IS NULL), 0) AS cost_value,
-        COALESCE((SELECT SUM(b.quantity * p.selling_price_kobo) FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE p.deleted_at IS NULL), 0) AS retail_value`,
+        (SELECT COUNT(*) FROM products WHERE deleted_at IS NULL AND status='inactive') AS inactive_products`,
     )
   )[0]!;
 
@@ -90,9 +88,9 @@ export async function inventoryDashboard(
   return {
     totalActiveProducts: Number(totals.active_products),
     totalInactiveProducts: Number(totals.inactive_products),
-    totalStockQuantity: Number(totals.stock_quantity),
-    stockValueCostKobo: Number(totals.cost_value),
-    retailValueKobo: Number(totals.retail_value),
+    totalStockQuantity: valuation.totalUnits,
+    stockValueCostKobo: valuation.totalCostKobo,
+    retailValueKobo: valuation.totalRetailKobo,
     lowStockCount: Number(counts.low_stock),
     outOfStockCount: Number(counts.out_of_stock),
     expiredBatchCount: Number(counts.expired_batches),

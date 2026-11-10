@@ -806,12 +806,15 @@ describe('suppliers', () => {
 describe('dashboard, reporting, and reconciliation', () => {
   it('separates inventory cost value from retail value', async () => {
     const product = await createProduct();
+    // One pack of 10 tablets really cost ₦45.00 (₦4.50 per tablet) even though the product's
+    // cost price is ₦50.00. Since Phase 7 the dashboard values stock at actual batch acquisition
+    // cost (see services/inventory/valuation.ts), so cost value is ₦45.00, not 10 × ₦50.00.
     await receive(product.id, { quantity: 1, unitCostKobo: 4_500, batchNumber: 'LOT-1' });
     const dashboard = await auth(owner, ownerSession).get('/api/inventory/dashboard');
     expect(dashboard.status).toBe(200);
     expect(dashboard.body.totalActiveProducts).toBe(1);
     expect(dashboard.body.totalStockQuantity).toBe(10);
-    expect(dashboard.body.stockValueCostKobo).toBe(50_000); // 10 tablets × ₦50 cost
+    expect(dashboard.body.stockValueCostKobo).toBe(4_500); // 10 tablets × ₦4.50 delivered cost
     expect(dashboard.body.retailValueKobo).toBe(100_000); // 10 × ₦100 selling
     expect(dashboard.body.lowStockCount).toBe(1);
     expect(dashboard.body.recentMovements).toHaveLength(1);

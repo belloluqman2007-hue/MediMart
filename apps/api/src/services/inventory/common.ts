@@ -8,6 +8,7 @@ import type {
 } from '@medimart/shared';
 import { requireActiveContext, type AuthContext } from '../auth';
 import { ApiError } from '../../errors';
+import { stockCostValueSql } from './valuation';
 
 export type ProductRow = {
   id: string;
@@ -140,7 +141,7 @@ export function mapMovement(row: MovementRow): MovementSummary {
 export const productSelect = `
   SELECT p.*, c.name AS category_name, u.name AS base_unit_name, u.symbol AS base_unit_symbol,
     COALESCE(b.quantity, 0) AS stock_quantity,
-    COALESCE(b.quantity, 0) * p.purchase_cost_kobo AS stock_value_cost_kobo,
+    CASE WHEN COALESCE(b.quantity, 0) > 0 THEN ${stockCostValueSql('p')} ELSE 0 END AS stock_value_cost_kobo,
     (SELECT COUNT(*) FROM product_batches pb WHERE pb.product_id = p.id AND pb.quantity_remaining > 0) AS batch_count,
     (SELECT MIN(pb.expiry_date) FROM product_batches pb WHERE pb.product_id = p.id AND pb.quantity_remaining > 0 AND pb.expiry_date IS NOT NULL) AS nearest_expiry_date,
     cu.full_name AS created_by_name
