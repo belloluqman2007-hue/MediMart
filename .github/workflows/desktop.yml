@@ -105,15 +105,32 @@ jobs:
           $env:MEDIMART_DESKTOP_PORT = "4791"
           $env:APPDATA = "$env:RUNNER_TEMP\appdata"
           New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-          & "$pkg\MediMart.exe"
-          $code = $LASTEXITCODE
+          # MediMart.exe is a GUI-subsystem program: PowerShell does not wait for `& exe`, so
+          # $LASTEXITCODE would be stale. Start-Process -Wait reads the real exit code.
+          $proc = Start-Process -FilePath "$pkg\MediMart.exe" -PassThru -Wait
+          $code = $proc.ExitCode
           Write-Host "MediMart.exe exit code: $code"
-          if (Test-Path $report) { Get-Content $report }
-          if ($code -ne 0) { throw "The packaged application self-test failed (exit $code)." }
-          $json = Get-Content $report -Raw | ConvertFrom-Json
-          if (-not $json.ok) { throw "Diagnostics reported a failure: $($json | ConvertTo-Json -Depth 6)" }
+          if (-not (Test-Path $report)) {
+            Get-Content "$env:APPDATA\MediMart\logs\medimart.log" -ErrorAction SilentlyContinue
+            Write-Output "::error title=Packaged self-test::The packaged application produced no diagnostics report (exit $code)."
+            throw "The packaged application produced no diagnostics report (exit $code)."
+          }
+          $raw = Get-Content $report -Raw
+          Write-Host $raw
+          $json = $raw | ConvertFrom-Json
+          foreach ($check in $json.checks) {
+            $state = if ($check.ok) { "ok" } else { "FAILED" }
+            Write-Host ("  [{0}] {1} {2}" -f $state, $check.name, $check.detail)
+            if (-not $check.ok) {
+              Write-Output ("::error title=Packaged self-test check failed::" + $check.name + " :: " + $check.detail)
+            }
+          }
+          if ($json.error) { Write-Output ("::error title=Packaged self-test error::" + $json.error) }
+          if ($code -ne 0 -or -not $json.ok) {
+            throw "The packaged application self-test failed (exit $code). See the annotations above."
+          }
           if ($json.platform -ne "win32-x64") { throw "Unexpected platform $($json.platform)" }
-          Write-Host "Packaged self-test passed on $($json.platform), Electron $($json.electron)"
+          Write-Host "Packaged self-test passed on $($json.platform), Electron $($json.electron), app path $($json.appPath)"
 
       - name: Launch the window and capture a screenshot
         shell: pwsh
@@ -132,6 +149,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path screenshots | Out-Null
           if (-not $healthy) {
             Get-Content "$env:APPDATA\MediMart\logs\medimart.log" -ErrorAction SilentlyContinue
+            Write-Output "::error title=Desktop window::The launched window did not bring up its local server within 120s."
             throw "The launched window did not bring up its local server."
           }
           Start-Sleep -Seconds 10
