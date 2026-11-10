@@ -148,55 +148,14 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
 
-      # API 30 is the image GitHub's emulator runner provisions and boots reliably. The application
-      # itself declares minSdk 24 (Android 7.0); the APK's minSdkVersion is asserted below from the
-      # APK, so the supported range is not merely claimed, and the older-Android launch itself is
-      # covered by the separate best-effort job at the end of this workflow.
-      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-        with:
-          api-level: 30
-          arch: x86_64
-          target: google_apis
-          emulator-boot-timeout: 1500
-          emulator-options: -no-snapshot -no-boot-anim -gpu swiftshader_indirect
-          disable-animations: true
-          script: |
-            set -euo pipefail
-            mkdir -p evidence
-            adb install -r apk/medimart-debug.apk
-            adb shell pm list packages | grep -Fx 'package:com.medimart.app'
-            adb shell dumpsys package com.medimart.app | grep -E 'versionName|versionCode|firstInstallTime' | head -4
-            adb logcat -c
-            adb shell am start -W -n com.medimart.app/com.medimart.app.MainActivity
-            sleep 40
-            adb exec-out screencap -p > evidence/android-launch.png
-            # A crash or a WebView error during the first 40 seconds is a failed launch even when
-            # the process is technically still listed.
-            adb logcat -d > evidence/android-logcat.txt
-            adb shell pidof com.medimart.app | tee evidence/android-pid.txt
-            adb shell dumpsys activity activities | grep -A2 'mResumedActivity' | tee -a evidence/android-pid.txt || true
-            if grep -E 'FATAL EXCEPTION|AndroidRuntime: Process: com.medimart.app' evidence/android-logcat.txt; then
-              echo "The application crashed on launch" >&2
-              grep -A 25 'FATAL EXCEPTION' evidence/android-logcat.txt >&2
-              exit 1
-            fi
-            if grep -E 'net::ERR_|ERR_CLEARTEXT|chromium.*ERROR' evidence/android-logcat.txt | grep -v 'GmsClient' | head -5; then
-              echo "WebView reported a load error" >&2
-            fi
-            # The launch must not be an empty white screen: the screenshot must not be uniform.
-            python3 - <<'PY'
-            import struct, zlib, sys
-            path = 'evidence/android-launch.png'
-            data = open(path, 'rb').read()
-            assert data[:8] == b'\x89PNG\r\n\x1a\n', 'not a PNG'
-            # Count distinct bytes in the compressed stream as a cheap "is it blank?" heuristic.
-            if len(set(data[200:])) < 40:
-                sys.exit('The launch screenshot looks blank')
-            print('Launch screenshot captured:', len(data), 'bytes')
-            PY
-            adb shell dumpsys package com.medimart.app > evidence/android-package.txt
-            # Pairing + sync contract against a live server on the emulator's host loopback.
-            node --import=tsx scripts/test-android-pairing.ts http://10.0.2.2:4191 | tee evidence/pairing-sync.txt
+      # The API 30 image is the one GitHub's runner provisions and boots reliably. The application
+      # declares minSdk 24 (Android 7.0); that floor is asserted from the APK in the `apk` job above,
+      # and the Android 8.1 launch is covered by the best-effort job at the end of this workflow.
+      - name: Install and launch the APK in an emulator
+        env:
+          APK_PATH: apk/medimart-debug.apk
+        run: bash scripts/android-emulator.sh 30 evidence http://10.0.2.2:4191
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -205,9 +164,9 @@ jobs:
           retention-days: 30
 
   older-android:
-    # Best effort, on purpose: GHA's emulator runner does not always have an API 27 image, and a
-    # missing image must not be mistaken for a broken application. When it does run, it proves the
-    # APK installs and launches on Android 8.1 (two release levels above the declared minSdk 24).
+    # Best effort, on purpose: this proves the APK installs and launches on Android 8.1 (API 27), two
+    # release levels above the declared minSdk 24. The main device job is the required evidence, so a
+    # missing system image here is reported as a warning and not mistaken for a broken application.
     needs: apk
     continue-on-error: true
     runs-on: ubuntu-latest
@@ -223,31 +182,7 @@ jobs:
         with:
           name: MediMart-Android
           path: apk
-      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-        with:
-          api-level: 27
-          arch: x86_64
-          target: google_apis
-          emulator-boot-timeout: 1500
-          disable-animations: true
-          script: |
-            set -euo pipefail
-            mkdir -p evidence-android81
-            adb install -r apk/medimart-debug.apk
-            adb shell getprop ro.build.version.release | tee evidence-android81/android-version.txt
-            adb logcat -c
-            adb shell am start -W -n com.medimart.app/com.medimart.app.MainActivity
-            sleep 35
-            adb logcat -d > evidence-android81/logcat.txt
-            adb exec-out screencap -p > evidence-android81/launch.png
-            if grep -E 'FATAL EXCEPTION|AndroidRuntime: Process: com.medimart.app' evidence-android81/logcat.txt; then
-              echo "::error title=Android 8.1 launch::The application crashed on Android 8.1."
-              exit 1
-            fi
-            adb shell pidof com.medimart.app | tee evidence-android81/pid.txt
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: MediMart-Android-8.1-evidence
-          path: evidence-android81/
-          retention-days: 30
+      - name: Install and launch the APK on Android 8.1
+        env:
+          APK_PATH: apk/medimart-debug.apk
+        run: bash scripts/android-emulator.sh 27 evidence-android81
