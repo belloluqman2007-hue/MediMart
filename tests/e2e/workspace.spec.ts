@@ -589,3 +589,43 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
   expect(axe.violations).toEqual([]);
 });
+
+test('sync diagnostics do not claim that connected means synchronized', async ({ page }) => {
+  const bootstrap = await (await page.request.get('/api/auth/bootstrap-status')).json();
+  if (bootstrap.required) {
+    const registration = await page.request.post('/api/auth/register-owner', {
+      data: { ...postChangeOwner, bootstrapToken: 'e2e-only-not-a-real-credential-00000000000000' },
+    });
+    expect(registration.status()).toBe(201);
+    const registered = await registration.json();
+    await page.request.post('/api/auth/logout', {
+      headers: { 'X-CSRF-Token': registered.csrfToken },
+      data: {},
+    });
+  }
+  await signIn(page, postChangeOwner);
+  await page.goto('/#/backup-sync');
+  await expect(
+    page.getByRole('heading', { name: 'Synchronization is not available' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Reachability is not confirmation that data has synchronized.'),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Central database · Counts only; no transaction details are shown.'),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh diagnostics' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sync Now' })).toHaveCount(0);
+  if (process.env.MEDIMART_CAPTURE_SYNC === '1') {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page
+      .getByRole('button', { name: 'Dismiss notification' })
+      .click()
+      .catch(() => {});
+    await page.waitForTimeout(1000); // Allow the responsive navigation transition to finish.
+    await page.screenshot({
+      path: 'docs/screenshots/phase6/sync-diagnostics-browser.png',
+      fullPage: true,
+    });
+  }
+});

@@ -10,6 +10,7 @@ import { Dashboard } from './features/Dashboard';
 import { AuthPage } from './features/AuthPage';
 import { PlaceholderPage } from './features/PlaceholderPage';
 import { SettingsPage } from './features/SettingsPage';
+import { SyncStatusPage } from './features/SyncStatusPage';
 import { InventoryLayout } from './features/inventory/InventoryLayout';
 import { InventoryDashboard } from './features/inventory/InventoryDashboard';
 import { ProductsPage } from './features/inventory/ProductsPage';
@@ -105,6 +106,7 @@ export function App({ runtime }: { runtime: Runtime }) {
             <Route element={<AppShell />}>
               <Route index element={<Dashboard />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="backup-sync" element={<SyncStatusPage />} />
               <Route path="inventory" element={<InventoryLayout />}>
                 <Route index element={<InventoryDashboard />} />
                 <Route path="products" element={<ProductsPage />} />
@@ -176,6 +178,7 @@ export function App({ runtime }: { runtime: Runtime }) {
                     ![
                       '/',
                       '/settings',
+                      '/backup-sync',
                       '/inventory',
                       '/suppliers',
                       '/pos',

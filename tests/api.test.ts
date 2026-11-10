@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { migrate, type Database } from '@medimart/database';
+import { commitLocalOperation, migrate, type Database } from '@medimart/database';
 import { openNodeDatabase } from '@medimart/database/node';
 import { createApp } from '../apps/api/src/app';
 import { loadConfig, type ApiConfig } from '../apps/api/src/config';
@@ -603,5 +603,50 @@ describe('pairing and audit foundations', () => {
       ownerSession.csrfToken!,
     ])
       expect(text).not.toContain(secret);
+  });
+});
+
+describe('sync diagnostics authorization', () => {
+  it('requires a current sync.view grant and never exposes queued payloads', async () => {
+    expect((await request(app).get('/api/sync/status')).status).toBe(401);
+    await bootstrap();
+    await addStaff();
+    const cashier = request.agent(app);
+    expect(
+      (
+        await cashier
+          .post('/api/auth/login')
+          .set('Origin', origin)
+          .send({ email: staffBody.email, password: staffBody.password })
+      ).status,
+    ).toBe(200);
+    expect((await cashier.get('/api/sync/status')).status).toBe(403);
+    const deviceId = crypto.randomUUID();
+    await db.run("INSERT INTO devices (id,name,platform) VALUES (?,'Test','android')", [deviceId]);
+    await commitLocalOperation(
+      db,
+      {
+        id: crypto.randomUUID(),
+        deviceId,
+        entityId: crypto.randomUUID(),
+        entityType: 'foundation_record',
+        mutation: 'create',
+        baseVersion: 0,
+        payload: { confidential: 'sensitive-value' },
+      },
+      async () => {},
+    );
+    const response = await owner.get('/api/sync/status');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      implemented: false,
+      pending: 1,
+      inFlight: 0,
+      failed: 0,
+      conflicted: 0,
+      openConflicts: 0,
+    });
+    expect(JSON.stringify(response.body)).not.toContain('sensitive-value');
+    expect(JSON.stringify(response.body)).not.toContain('payload');
   });
 });

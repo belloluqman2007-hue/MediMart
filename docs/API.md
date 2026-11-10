@@ -33,7 +33,7 @@ State-changing origin checks apply independently of permissions. No frontend nav
 | `GET /settings`              | `settings.view`                                           | Business-name setting                                               |
 | `PUT /settings`              | `settings.manage`                                         | Save business name transactionally with an audit entry              |
 | `GET /audit-logs?limit=50`   | `audit.view`                                              | Read up to 100 immutable event records                              |
-| `GET /sync/status`           | `sync.view`                                               | Pending central queue count and explicit `implemented: false`       |
+| `GET /sync/status`           | `sync.view`                                               | Central queue and open conflict counts; `implemented: false`        |
 
 Inventory (Phase 2), sales/POS and debts (Phase 3), healthcare (Phase 4) and purchasing, supplier
 payments, expenses and financial reporting (Phase 5) endpoints exist. Backup execution and push/pull
