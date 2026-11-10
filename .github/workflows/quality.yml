@@ -31,6 +31,8 @@ jobs:
       # One retry, on CI only: two suites in this file (service-worker activation and the fully
       # offline reload) depend on browser timing rather than application behaviour. The Windows job
       # runs the same suite without retries, so a retry can never turn a real regression green.
+      # In CI one retry absorbs timing jitter; assertions that create rows use a per-attempt unique
+      # identifier, so a retried attempt cannot collide with what the first attempt already wrote.
       - name: Browser end-to-end tests
         run: |
           npx playwright install --with-deps chromium

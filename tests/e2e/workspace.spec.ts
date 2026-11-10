@@ -435,7 +435,12 @@ test('owner opens the Phase 5 purchasing and finance workspaces without runtime 
 });
 
 test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async ({ page }) => {
-  test.setTimeout(90_000);
+  // A long clinical journey: registering, vitals, consultation, prescription and dispensing.
+  // 90s was not enough on a loaded CI runner, which surfaced as a timeout at a late step.
+  test.setTimeout(180_000);
+  // Unique per attempt: a retry must not collide with rows an earlier attempt created in the same
+  // database (a duplicate staff e-mail answers 409 and the retry then fails for the wrong reason).
+  const attempt = crypto.randomUUID().slice(0, 8);
   const bootstrap = await (await page.request.get('/api/auth/bootstrap-status')).json();
   if (bootstrap.required) {
     const registration = await page.request.post('/api/auth/register-owner', {
@@ -458,7 +463,7 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
     page.request.post(url, { headers: { 'X-CSRF-Token': session.csrfToken }, data });
   const clinical = {
     fullName: 'Synthetic Clinical Professional',
-    email: 'clinical@synthetic.test',
+    email: `clinical-${attempt}@synthetic.test`,
     password: 'Synthetic clinical passphrase 2026!',
   };
   const created = await post('/api/staff', {
@@ -473,7 +478,7 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   expect(unit).toBeTruthy();
   const product = await post('/api/products', {
     name: 'Synthetic Clinical Medicine',
-    sku: 'SYNTH-E2E-MED',
+    sku: `SYNTH-E2E-MED-${attempt}`,
     productType: 'medicine',
     purchaseCostKobo: 100,
     sellingPriceKobo: 200,
