@@ -567,7 +567,7 @@ function ConnectionSettings() {
               ? 'Application assets and database migrations are bundled in this installation. A failed database initialization blocks startup rather than falling back to unsafe storage.'
               : 'Your computer hosts the authoritative database. Each Android installation initializes a separate SQLite database.'}{' '}
             Queue, receipt, and conflict records are prepared; no business records are synchronized
-            in Phase 1.
+            yet.
           </p>
         </div>
       </section>
@@ -984,7 +984,7 @@ function DeviceSettings() {
               <LockKeyhole size={20} />
               <p>
                 All server sessions on this device will end immediately. Its local records are not
-                deleted. Re-enrollment of revoked devices is not available in Phase 1.
+                deleted. Re-enrollment of revoked devices is not available yet.
               </p>
             </div>
           )}

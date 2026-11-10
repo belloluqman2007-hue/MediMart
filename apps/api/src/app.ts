@@ -5,7 +5,7 @@ import { rateLimit } from 'express-rate-limit';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import type { Database } from '@medimart/database';
+import { readSyncStatus, type Database } from '@medimart/database';
 import {
   approveDeviceSchema,
   businessSettingsSchema,
@@ -270,15 +270,11 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
     });
   });
   app.get('/api/sync/status', authenticated, requirePermission('sync.view'), async (_req, res) => {
-    const pending = (
-      await db.all<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM sync_queue WHERE status='pending'",
-      )
-    )[0]!.count;
+    const counts = await readSyncStatus(db);
     res.json({
       implemented: false,
-      pending,
-      message: 'Durable outbox only. No synchronization worker runs in Phase 1.',
+      ...counts,
+      message: 'Diagnostics only. No synchronization worker or business handlers are implemented.',
     });
   });
   registerInventoryRoutes(app, db, auth);

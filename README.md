@@ -2,7 +2,11 @@
 
 **Business, in good health.** A local-first foundation for pharmacy, mini-mart, and patient-management software.
 
-> **Phases 1–5 complete — ready for review, not business use.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses and separated financial reporting are implemented. Backup/sync execution remains a navigation placeholder. **No APK has been built or verified in this environment.** See the [Phase 5 report](docs/PHASE_5_REPORT.md).
+> **Phases 1–5 implemented; Phase 6 is incomplete and not ready for business use.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses and separated financial reporting are implemented. Backup and Sync provides read-only diagnostics, not synchronization or backup execution. **No APK has been built or verified in this environment.** See the [Phase 5 report](docs/PHASE_5_REPORT.md).
+
+## Architecture and technology
+
+The central computer runs a Node.js/Express API with a `better-sqlite3` authoritative database. The React/TypeScript/Vite web app calls that API; Android packages the same UI in a Capacitor shell and initializes a separate SQLCipher SQLite database with Keystore-backed secrets. Shared validation, permissions and migrations live in `packages/`. The local database foundation does not yet provide offline business data or authentication. No paid service or cloud connection is required to run the central application on a local network.
 
 ## What works now
 
@@ -14,7 +18,7 @@
 - Device registration, expiring pairing codes, authorized approval, proof-bound native sessions, and revocation.
 - Central SQLite database; shared, checksummed migrations for **49 tables** (eleven migrations); append-only application audit logs.
 - Android SQLite/SQLCipher initialization, installation UUIDs, Keystore-backed secret storage, configurable server address, and lifecycle/network hooks.
-- Atomic local-write/outbox primitives, receipt deduplication, and conflict snapshots. **No transport worker or business handlers.**
+- Atomic local-write/outbox primitives, receipt deduplication, conflict snapshots and permission-gated aggregate queue diagnostics. **No transport worker or business handlers.**
 - Locally bundled Android assets and fonts. A production browser build can cache its **public shell only** on a secure origin; API responses are never cached.
 
 ### Sales and POS (Phase 3)
@@ -62,7 +66,7 @@ See the [Phase 2 report](docs/PHASE_2_REPORT.md), [Phase 1 report](docs/PHASE_1_
 
 ## Run this checkout
 
-Run commands from the repository root containing these Phase 1 changes:
+Run commands from the repository root:
 
 ```bash
 npm ci
@@ -243,14 +247,28 @@ var/                      Local development DB (ignored)
 
 - Do not edit released migrations or their frozen seed snapshot. Add a new migration; checksum drift blocks startup.
 - Never synchronize password hashes, sessions, device secrets, or bootstrap tokens through the business outbox.
-- Do not copy a live SQLite file alone as a backup while WAL writes are in progress. Phase 1 has no backup UI or scheduled backup process. See the [database guide](docs/DATABASE.md).
+- Do not copy a live SQLite file alone as a backup while WAL writes are in progress. There is no backup UI, restore tool or scheduled backup process. See the [database guide](docs/DATABASE.md).
 - Do not clear Android app data or uninstall to fix a connection error. This removes installation identity and local records.
 - A cached shell is **not** offline authentication. Disconnected clients do not receive protected privileges. Offline credential/lease policy and actual offline business operations need a separately approved phase.
 - Inventory, sales and Phase 5 writes are online-only: `product*`, `stock_*`, `supplier*`, `category*`, `unit*`, `product_batch*`, sales, purchase, receipt, supplier-payment and expense entities are denied by the business outbox. The stock ledger is authoritative; cached balances are compared by the reconciliation report, never silently overwritten.
 - Never store money as floating point. Amounts are integer kobo from form input through the database.
 - No paid services, public hosting, or cloud synchronization are required or configured.
 
-**Stop after Phase 5. Phase 6 begins only after the owner reviews `docs/PHASE_5_REPORT.md` and explicitly approves it.**
+## Phase 6 progress and limitations
+
+The Backup and Sync page reports the current connection and, when a connected session has `sync.view`, aggregate counts for the central queue or this Android installation's local queue. It never transmits, changes, retries or deletes operations. Its refresh action is **not** Sync Now. The API exposes counts only to authorized users; no payloads or conflict details are returned. A reachable server is not proof of synchronization. Without a live authenticated session the application does not grant access to these diagnostics, including when disconnected.
+
+This is **not a completed offline-first implementation**: there is no offline login, catalogue download, offline sales, printing from offline data, payments, debts, patient access, prescription/dispensing sync, incoming updates, sync worker, server acknowledgement protocol, conflict resolution, Android backup or restore. All business operations require a central connection. The outbox denylist remains in place. The server address cannot be changed after enrollment; a safe rebind for changing IP addresses is not implemented. The API does not discover LAN addresses or produce QR codes. Pairing codes are generated on the phone and approved by an authorized central user, as described above. No local TLS, firewall or public-internet exposure protection is automatically provisioned; administrators must configure them.
+
+### Backup and recovery
+
+No in-app backup or restore is available. Before attempting recovery, stop use of the affected device and contact the administrator; do not uninstall, clear data, delete queue records or overwrite a potentially newer database. The Android database and Keystore keys must be preserved together; there is no verified Android export/recovery procedure. Protect central backups as sensitive clinical and financial information, and use a SQLite-aware consistent backup, not a copy of a live database without its WAL. Restoration should be done only after validating integrity on an isolated copy, preserving the original and explicitly assessing newer data. No automated integrity-validation or restoration workflow is supplied. See [database recovery boundaries](docs/DATABASE.md#backup-and-recovery-boundaries).
+
+### Remaining roadmap
+
+- **Phase 6:** complete and verify offline authorization, local domain operations, secure LAN synchronization, conflict handling, safe backups and real Android-device testing before deployment.
+- **Phase 7:** future scope to be defined and approved; not started here.
+- **Phase 8:** future owner-controlled cloud synchronization; not implemented and not required for local operations.
 
 ## Third-party assets
 
