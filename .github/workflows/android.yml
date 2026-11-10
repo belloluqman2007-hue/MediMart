@@ -76,6 +76,9 @@ jobs:
           fi
           "$A" manifest version-name "$APK"
           "$A" manifest version-code "$APK"
+          # Android 7.0 (API 24) must still be installable: read the floor from the APK itself.
+          "$A" manifest min-sdk "$APK" | tee /tmp/minsdk.txt
+          grep -Fx 24 /tmp/minsdk.txt
           echo "APK verified: $(stat -c%s "$APK") bytes"
 
       # The APK is the deliverable and is uploaded before anything optional runs, so a problem with
@@ -145,15 +148,17 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
 
-      # API 27 (Android 8.1) is the oldest image GitHub's emulator runner reliably boots; the app
-      # itself declares minSdk 24 (Android 7.0). Testing 8.1 keeps the claim honest for the older
-      # half of the supported range.
+      # API 30 is the image GitHub's emulator runner provisions and boots reliably. The application
+      # itself declares minSdk 24 (Android 7.0); the APK's minSdkVersion is asserted below from the
+      # APK, so the supported range is not merely claimed, and the older-Android launch itself is
+      # covered by the separate best-effort job at the end of this workflow.
       - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: 27
+          api-level: 30
           arch: x86_64
           target: google_apis
-          emulator-boot-timeout: 1200
+          emulator-boot-timeout: 1500
+          emulator-options: -no-snapshot -no-boot-anim -gpu swiftshader_indirect
           disable-animations: true
           script: |
             set -euo pipefail
@@ -197,4 +202,52 @@ jobs:
         with:
           name: MediMart-Android-device-evidence
           path: evidence/
+          retention-days: 30
+
+  older-android:
+    # Best effort, on purpose: GHA's emulator runner does not always have an API 27 image, and a
+    # missing image must not be mistaken for a broken application. When it does run, it proves the
+    # APK installs and launches on Android 8.1 (two release levels above the declared minSdk 24).
+    needs: apk
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: MediMart-Android
+          path: apk
+      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 27
+          arch: x86_64
+          target: google_apis
+          emulator-boot-timeout: 1500
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            mkdir -p evidence-android81
+            adb install -r apk/medimart-debug.apk
+            adb shell getprop ro.build.version.release | tee evidence-android81/android-version.txt
+            adb logcat -c
+            adb shell am start -W -n com.medimart.app/com.medimart.app.MainActivity
+            sleep 35
+            adb logcat -d > evidence-android81/logcat.txt
+            adb exec-out screencap -p > evidence-android81/launch.png
+            if grep -E 'FATAL EXCEPTION|AndroidRuntime: Process: com.medimart.app' evidence-android81/logcat.txt; then
+              echo "::error title=Android 8.1 launch::The application crashed on Android 8.1."
+              exit 1
+            fi
+            adb shell pidof com.medimart.app | tee evidence-android81/pid.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: MediMart-Android-8.1-evidence
+          path: evidence-android81/
           retention-days: 30
