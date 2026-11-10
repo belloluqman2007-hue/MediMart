@@ -4,3 +4,5 @@ export * from './permissions';
 export * from './sales';
 export * from './sync';
 export * from './server-url';
+
+export * from './healthcare';

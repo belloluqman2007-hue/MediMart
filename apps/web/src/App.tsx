@@ -1,3 +1,4 @@
+import { HealthcarePage } from './features/Healthcare';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { HashRouter, Link, Route, Routes } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
@@ -119,6 +120,21 @@ export function App({ runtime }: { runtime: Runtime }) {
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="debts" element={<DebtsPage />} />
               <Route path="reports" element={<ReportsPage />} />
+              {[
+                'patients',
+                'patients/new',
+                'patients/:id',
+                'patients/:id/edit',
+                'consultations',
+                'consultations/new',
+                'prescriptions',
+                'prescriptions/new',
+                'prescriptions/:id',
+                'dispensing',
+                'patient-reports',
+              ].map((path) => (
+                <Route key={path} path={path} element={<HealthcarePage key={path} />} />
+              ))}
               {navigation
                 .filter(
                   (item) =>
@@ -131,6 +147,11 @@ export function App({ runtime }: { runtime: Runtime }) {
                       '/customers',
                       '/debts',
                       '/reports',
+                      '/patients',
+                      '/consultations',
+                      '/prescriptions',
+                      '/dispensing',
+                      '/patient-reports',
                     ].includes(item.path),
                 )
                 .map((item) => (

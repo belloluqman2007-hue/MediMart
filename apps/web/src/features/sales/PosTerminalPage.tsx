@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Barcode,
   CheckCircle2,
@@ -29,6 +29,7 @@ import {
   type PosProduct,
   type ProductType,
   type SaleDetail,
+  type Prescription,
 } from '@medimart/shared';
 import { errorMessage } from '../../lib/api';
 import { useApp } from '../../lib/context';
@@ -80,6 +81,43 @@ function createPaymentLeg(method: PaymentMethod = 'cash', amountInput = ''): Pay
 
 export function PosTerminalPage() {
   const { api, user, notify } = useApp();
+  const navigate = useNavigate();
+  const prescriptionId = new URLSearchParams(useLocation().search).get('prescriptionId');
+  const [reviewedPrescription, setReviewedPrescription] = useState(false);
+  const [loadingPrescription, setLoadingPrescription] = useState(false);
+  async function loadPrescriptionCart() {
+    if (!prescriptionId) return;
+    setLoadingPrescription(true);
+    setCheckoutError(null);
+    try {
+      const { prescription: rx } = await api.request<{ prescription: Prescription }>(
+        `/api/prescriptions/${prescriptionId}`,
+      );
+      if (!['authorized', 'partial'].includes(rx.status))
+        throw new Error('This prescription is not outstanding and authorized.');
+      const lines: CartLine[] = [];
+      for (const item of rx.items.filter((i) => i.quantity > i.dispensed)) {
+        const found = await api.request<Paginated<PosProduct>>(
+          `/api/pos/products?search=${encodeURIComponent(item.medicineName)}`,
+        );
+        const product = found.items.find((p) => p.id === item.productId);
+        if (!product) throw new Error('A prescribed medicine is unavailable in the POS catalogue.');
+        lines.push({
+          key: crypto.randomUUID(),
+          product,
+          unitId: product.baseUnitId,
+          quantity: item.quantity - item.dispensed,
+          lineDiscountInput: '0.00',
+        });
+      }
+      setCart(lines);
+      setReviewedPrescription(false);
+    } catch (e) {
+      setCheckoutError(errorMessage(e));
+    } finally {
+      setLoadingPrescription(false);
+    }
+  }
   const canAccess = Boolean(user && hasPermission(user.permissions, 'pos.access'));
   const canCreateSale = Boolean(user && hasPermission(user.permissions, 'sales.create'));
   const canDiscountDirectly = Boolean(user && hasPermission(user.permissions, 'sales.discount'));
@@ -438,7 +476,12 @@ export function PosTerminalPage() {
       return;
     }
 
+    if (prescriptionId && !reviewedPrescription) {
+      setCheckoutError('Review the prescription and medicine warnings before checkout.');
+      return;
+    }
     const corePayload = {
+      ...(prescriptionId ? { prescription: { id: prescriptionId, reviewedWarnings: true } } : {}),
       customerId: customerId || null,
       items: cartMath.lines.map((line) => ({
         productId: line.product.id,
@@ -476,6 +519,7 @@ export function PosTerminalPage() {
           : {}),
       });
       setCompletedSale(sale);
+      if (prescriptionId) navigate('/pos', { replace: true });
       resetSaleWorkspace();
       catalog.reload();
       customersState.reload();
@@ -1213,6 +1257,30 @@ export function PosTerminalPage() {
               )}
             </dl>
 
+            {prescriptionId && (
+              <div className="health-warning">
+                <Link to={`/prescriptions/${prescriptionId}`}>Review linked prescription</Link>
+                <Button
+                  variant="secondary"
+                  disabled={loadingPrescription || submitting}
+                  onClick={loadPrescriptionCart}
+                >
+                  Load remaining prescription into cart
+                </Button>
+                <p>
+                  Add only prescribed medicines and quantities. Payment and dispensing are saved
+                  together, with a single stock deduction.
+                </p>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={reviewedPrescription}
+                    onChange={(e) => setReviewedPrescription(e.target.checked)}
+                  />{' '}
+                  I reviewed the current prescription, allergies and medicine warnings
+                </label>
+              </div>
+            )}
             <FormError message={checkoutError} />
 
             <Button
