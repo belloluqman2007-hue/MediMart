@@ -60,13 +60,16 @@ ls -l /dev/kvm || fail "No KVM" "This runner does not expose /dev/kvm, so the em
 "$SDKMANAGER" --version 2>&1 | head -3 || fail "No Android SDK" "sdkmanager was not found at $SDKMANAGER."
 
 step "Install the API ${API_LEVEL} system image"
-yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-if ! "$SDKMANAGER" --install "$IMAGE" "platform-tools" "emulator" 2>&1 | tee "$EVIDENCE/sdkmanager.log" | tail -5; then
-  fail "System image unavailable" "sdkmanager could not install ${IMAGE}."
+# `sdkmanager --licenses` reads stdin and can sit forever when nothing is piped into it; bound it.
+timeout 300 sh -c "yes | \"$SDKMANAGER\" --licenses" > /dev/null 2>&1 || true
+# Every step here is bounded: an unbounded download must fail with a reason, not consume the job.
+if ! timeout 1500 "$SDKMANAGER" --install "$IMAGE" "platform-tools" "emulator" 2>&1 | tee "$EVIDENCE/sdkmanager.log" | tail -5; then
+  fail "System image unavailable" "sdkmanager could not install ${IMAGE} within 25 minutes."
 fi
+[ "$(ls -A "$SDK" 2>/dev/null)" ] || fail "No Android SDK" "The Android SDK directory $SDK is empty."
 
 step "Create the AVD"
-echo no | "$AVDMANAGER" create avd -n "$AVD" -k "$IMAGE" --device pixel_5 --force > "$EVIDENCE/avdmanager.log" 2>&1 ||
+timeout 300 sh -c "echo no | \"$AVDMANAGER\" create avd -n \"$AVD\" -k \"$IMAGE\" --device pixel_5 --force" > "$EVIDENCE/avdmanager.log" 2>&1 ||
   fail "AVD creation failed" "avdmanager could not create ${AVD}. See $EVIDENCE/avdmanager.log."
 grep -E "hw.ramSize|image.sysdir" "$HOME/.android/avd/${AVD}.avd/config.ini" 2>/dev/null | head -4 || true
 
