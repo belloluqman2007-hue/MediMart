@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILDS ONLY.
+
+  A debug APK is what a shop uses for controlled testing: it can talk to the central computer over
+  plain HTTP on the shop's private Wi-Fi, which needs no internet and no purchased certificate.
+  Cleartext is enabled for private/local addresses and the device's own loopback. Release builds use
+  the main network_security_config.xml, where cleartext is off.
+-->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
-        <trust-anchors><certificates src="system" /></trust-anchors>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
     </base-config>
-    <debug-overrides>
-        <trust-anchors><certificates src="user" /></trust-anchors>
-    </debug-overrides>
 </network-security-config>

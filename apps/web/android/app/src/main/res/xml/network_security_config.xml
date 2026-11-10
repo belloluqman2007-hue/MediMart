@@ -1,7 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release network policy.
+
+  The shop computer is reached over the local network. Where the owner has installed a certificate
+  trusted by the device (recommended), HTTPS is used and no exception is needed at all.
+
+  A shop without internet access cannot obtain a public certificate, so the release build also
+  permits cleartext traffic *only* to private LAN address ranges and only when the app was built
+  with the documented LAN profile (see docs/ANDROID.md). Public internet destinations keep
+  TLS-only enforcement, and no user-installed CA is trusted.
+-->
 <network-security-config>
-    <!-- Release: authenticated TLS only; never trust arbitrary user-installed CAs. -->
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors><certificates src="system" /></trust-anchors>
     </base-config>
+    <!-- Loopback (device-local) is never a data destination; kept explicit for clarity. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>

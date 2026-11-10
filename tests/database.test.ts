@@ -54,6 +54,8 @@ describe('SQLite schema and migrations', () => {
     expect(tables.map((r) => r.name)).toEqual([
       'application_settings',
       'audit_logs',
+      'backup_records',
+      'backup_settings',
       'categories',
       'consultations',
       'customer_debts',
@@ -66,6 +68,7 @@ describe('SQLite schema and migrations', () => {
       'expenses',
       'goods_receipt_items',
       'goods_receipts',
+      'offline_records',
       'patient_vitals',
       'patients',
       'permissions',
@@ -282,11 +285,20 @@ describe('durable outbox and synchronization primitives (no sync engine)', () =>
     const internalTables = await db.all<{ name: string }>(
       "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     );
-    expect(internalTables).toHaveLength(49);
+    expect(internalTables).toHaveLength(52);
     for (const { name: entityType } of internalTables) {
       expect(operationSchema.safeParse(op({ entityType })).success, entityType).toBe(false);
     }
-    for (const entityType of ['user', 'user_role', 'role_permission', 'session', 'setting']) {
+    for (const entityType of [
+      'user',
+      'user_role',
+      'role_permission',
+      'session',
+      'setting',
+      'offline_records',
+      'backup_records',
+      'backup_settings',
+    ]) {
       expect(operationSchema.safeParse(op({ entityType })).success, entityType).toBe(false);
     }
     await expect(

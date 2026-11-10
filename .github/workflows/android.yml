@@ -1,6 +1,14 @@
 name: Android debug verification (manual)
+# A shop that cannot reach the internet can still build the APK on a computer with the Android SDK
+# (`node scripts/build-apk.mjs --profile debug`). This workflow is for building it in CI instead.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/android/**'
+      - 'apps/web/src/**'
+      - '.github/workflows/android.yml'
 permissions:
   contents: read
 jobs:
@@ -24,6 +32,15 @@ jobs:
       - name: Compile the debug application and device-test harness
         working-directory: apps/web/android
         run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
+      - name: Confirm the camera permission is declared and optional
+        working-directory: apps/web/android
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print \
+            app/build/outputs/apk/debug/app-debug.apk > /tmp/manifest.xml
+          grep -q 'android.permission.CAMERA' /tmp/manifest.xml
+          grep -q 'android.hardware.camera' /tmp/manifest.xml
+          grep -q 'android:required="false"' /tmp/manifest.xml
+          ! grep -q 'ACCESS_FINE_LOCATION\|READ_CONTACTS\|READ_SMS' /tmp/manifest.xml
       - name: Verify the package identifier
         working-directory: apps/web/android
         run: |

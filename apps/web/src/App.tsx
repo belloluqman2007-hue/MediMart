@@ -9,8 +9,8 @@ import { Brand, Button } from './components/ui';
 import { Dashboard } from './features/Dashboard';
 import { AuthPage } from './features/AuthPage';
 import { PlaceholderPage } from './features/PlaceholderPage';
+import { BackupSyncPage } from './features/BackupSyncPage';
 import { SettingsPage } from './features/SettingsPage';
-import { SyncStatusPage } from './features/SyncStatusPage';
 import { InventoryLayout } from './features/inventory/InventoryLayout';
 import { InventoryDashboard } from './features/inventory/InventoryDashboard';
 import { ProductsPage } from './features/inventory/ProductsPage';
@@ -106,7 +106,6 @@ export function App({ runtime }: { runtime: Runtime }) {
             <Route element={<AppShell />}>
               <Route index element={<Dashboard />} />
               <Route path="settings" element={<SettingsPage />} />
-              <Route path="backup-sync" element={<SyncStatusPage />} />
               <Route path="inventory" element={<InventoryLayout />}>
                 <Route index element={<InventoryDashboard />} />
                 <Route path="products" element={<ProductsPage />} />
@@ -157,6 +156,7 @@ export function App({ runtime }: { runtime: Runtime }) {
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="debts" element={<DebtsPage />} />
               <Route path="reports" element={<ReportsPage />} />
+              <Route path="backup-sync" element={<BackupSyncPage />} />
               {[
                 'patients',
                 'patients/new',
@@ -193,6 +193,7 @@ export function App({ runtime }: { runtime: Runtime }) {
                       '/prescriptions',
                       '/dispensing',
                       '/patient-reports',
+                      '/backup-sync',
                     ].includes(item.path),
                 )
                 .map((item) => (

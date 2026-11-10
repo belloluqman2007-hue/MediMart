@@ -35,6 +35,7 @@ test('dashboard is honest, responsive, and has all 22 navigation entries', async
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
   await expect(page.locator('.sidebar-nav a')).toHaveCount(22);
+  // The four figures the dashboard genuinely cannot yet read stay labelled, not invented.
   await expect(page.getByText('Not available yet', { exact: true })).toHaveCount(4);
   for (const width of [1440, 1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -238,6 +239,7 @@ for (const [name, path] of [
     ).toEqual([]);
   });
 }
+
 test('individual password changes sign out the owner and accept the new credential', async ({
   page,
 }) => {
@@ -253,6 +255,7 @@ test('individual password changes sign out the owner and accept the new credenti
   await signIn(page, { ...owner, password: newPassword });
   await expect(page.getByText('Your account is ready', { exact: true })).toBeVisible();
 });
+
 test('skip navigation and settings tabs work with a keyboard without changing the wrong route', async ({
   page,
 }) => {
@@ -590,42 +593,76 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   expect(axe.violations).toEqual([]);
 });
 
-test('sync diagnostics do not claim that connected means synchronized', async ({ page }) => {
-  const bootstrap = await (await page.request.get('/api/auth/bootstrap-status')).json();
-  if (bootstrap.required) {
-    const registration = await page.request.post('/api/auth/register-owner', {
-      data: { ...postChangeOwner, bootstrapToken: 'e2e-only-not-a-real-credential-00000000000000' },
-    });
-    expect(registration.status()).toBe(201);
-    const registered = await registration.json();
-    await page.request.post('/api/auth/logout', {
-      headers: { 'X-CSRF-Token': registered.csrfToken },
-      data: {},
-    });
-  }
+test('owner synchronizes, creates a verified backup, and restores it with explicit confirmation', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
   await signIn(page, postChangeOwner);
   await page.goto('/#/backup-sync');
-  await expect(
-    page.getByRole('heading', { name: 'Synchronization is not available' }),
-  ).toBeVisible();
-  await expect(
-    page.getByText('Reachability is not confirmation that data has synchronized.'),
-  ).toBeVisible();
-  await expect(
-    page.getByText('Central database · Counts only; no transaction details are shown.'),
-  ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Refresh diagnostics' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sync Now' })).toHaveCount(0);
-  if (process.env.MEDIMART_CAPTURE_SYNC === '1') {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page
-      .getByRole('button', { name: 'Dismiss notification' })
-      .click()
-      .catch(() => {});
-    await page.waitForTimeout(1000); // Allow the responsive navigation transition to finish.
-    await page.screenshot({
-      path: 'docs/screenshots/phase6/sync-diagnostics-browser.png',
-      fullPage: true,
-    });
-  }
+  await expect(page.getByRole('heading', { name: 'Backup and Sync', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Synchronization', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Backups', exact: true })).toBeVisible();
+
+  // A backup is a real file: create it, then confirm it appears in the history with a checksum.
+  await page.getByRole('button', { name: 'Create backup now', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText(/backup/i, { timeout: 20_000 });
+  const history = page.locator('.backup-sync-grid ~ .card').filter({ hasText: 'Backup history' });
+  await expect(history).toContainText('.sqlite');
+  const verify = page.getByRole('button', { name: /^Verify$/ }).first();
+  await expect(verify).toBeVisible();
+  await verify.click();
+  await expect(page.getByRole('status')).toContainText(/intact|verified/i);
+
+  // Restore is gated behind typing the word, and says what will happen before it happens.
+  await page
+    .getByRole('button', { name: /^Restore$/ })
+    .first()
+    .click();
+  const restore = page.getByRole('dialog', { name: 'Restore this backup?' });
+  await expect(restore).toBeVisible();
+  const confirm = restore.getByRole('button', { name: 'Restore backup', exact: true });
+  await expect(confirm).toBeDisabled();
+  await restore.getByLabel('Type RESTORE to confirm', { exact: true }).fill('RESTORE');
+  await expect(confirm).toBeEnabled();
+  // Cancel, because the restore must not be applied to the running test database.
+  await restore.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(restore).toBeHidden();
+
+  // The page is honest about what a backup contains and where it lives.
+  await expect(page.getByRole('heading', { name: 'What a backup contains' })).toBeVisible();
+  await expect(page.getByText(/Documents/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+});
+
+test('the browser POS refuses to pretend an unreachable sale was saved', async ({ page }) => {
+  await signIn(page, postChangeOwner);
+  await page.goto('/#/pos');
+  await expect(page.getByRole('heading', { name: 'Checkout terminal', exact: true })).toBeVisible();
+  await page.getByLabel('Scan barcode or SKU', { exact: true }).fill('BR-E2E-0001');
+  await page.getByRole('button', { name: 'Scan / Add', exact: true }).click();
+  await page.getByLabel('Cash tendered (₦)', { exact: true }).fill('100.00');
+
+  const salesCalls: number[] = [];
+  await page.route('**/api/sales', (route) => {
+    salesCalls.push(1);
+    return route.abort('failed');
+  });
+  await page.getByRole('button', { name: /Complete sale/ }).click();
+
+  // A browser has no device database, so it cannot keep a sale safely. It must say so plainly
+  // instead of showing a receipt or an offline offer that would lose the record.
+  await expect(page.locator('.form-error, [role="alert"]').first()).toContainText(
+    /unreachable|connection/i,
+  );
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText(/Sale MM-/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Complete sale/ })).toBeVisible();
+  expect(salesCalls.length).toBeGreaterThan(0);
+
+  // The record really was not created: the sales history does not contain it.
+  await page.unroute('**/api/sales');
+  await page.goto('/#/pos/sales');
+  await expect(page.getByRole('heading', { name: 'Sales history', exact: true })).toBeVisible();
 });

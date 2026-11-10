@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "apps/*",
+    "apps/api",
+    "apps/web",
     "packages/*"
   ],
   "engines": {
@@ -30,6 +31,10 @@
     "android:sync": "node scripts/sync-android.mjs",
     "android:sync:dev": "node scripts/sync-android.mjs --development",
     "android:open": "npm exec -w @medimart/web -- cap open android",
+    "android:apk": "node scripts/build-apk.mjs --profile debug",
+    "android:apk:release": "node scripts/build-apk.mjs --profile release",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "icons:generate": "node scripts/generate-icons.mjs",
     "test:production": "node --import=tsx scripts/test-production.ts"
   },
   "devDependencies": {

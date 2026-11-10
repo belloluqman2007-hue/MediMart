@@ -2,11 +2,22 @@
 
 **Business, in good health.** A local-first foundation for pharmacy, mini-mart, and patient-management software.
 
-> **Phases 1–5 implemented; Phase 6 is incomplete and not ready for business use.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses and separated financial reporting are implemented. Backup and Sync provides read-only diagnostics, not synchronization or backup execution. **No APK has been built or verified in this environment.** See the [Phase 5 report](docs/PHASE_5_REPORT.md).
+> **Phases 1–6 complete — ready for review, not business use yet.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses, separated financial reporting, offline capture and synchronization, and verified backup/restore are implemented. A Windows desktop package and an Android APK build pipeline exist. **Read the honest limits before relying on this:** the Windows window has not been launched on Windows and no APK has been compiled in this environment. See the [Phase 6 report](docs/PHASE_6_REPORT.md).
+
+### Install it in the shop
+
+| I want to…                                                         | Read                                       |
+| ------------------------------------------------------------------ | ------------------------------------------ |
+| Install on the shop's Windows computer and run the first setup     | [docs/DESKTOP.md](docs/DESKTOP.md)         |
+| Install on a phone and connect it to the shop computer             | [docs/ANDROID.md](docs/ANDROID.md)         |
+| Walk through acceptance testing with fake data before real trading | [docs/PHASE_6_UAT.md](docs/PHASE_6_UAT.md) |
+| Understand backups and how to restore one                          | [DESKTOP.md §7](docs/DESKTOP.md#7-backups) |
+
+Quick version: extract the Windows zip, open `MediMart.exe`, use the setup token it shows to create the owner, then add products and staff. Phones on the same Wi-Fi pair with the code from **Settings → Device pairing**. Nothing needs internet.
 
 ## Architecture and technology
 
-The central computer runs a Node.js/Express API with a `better-sqlite3` authoritative database. The React/TypeScript/Vite web app calls that API; Android packages the same UI in a Capacitor shell and initializes a separate SQLCipher SQLite database with Keystore-backed secrets. Shared validation, permissions and migrations live in `packages/`. The local database foundation does not yet provide offline business data or authentication. No paid service or cloud connection is required to run the central application on a local network.
+The central computer runs a Node.js/Express API with a `better-sqlite3` authoritative database. The React/TypeScript/Vite web app calls that API; Android packages the same UI in a Capacitor shell and initializes a separate SQLCipher SQLite database with Keystore-backed secrets. Shared validation, permissions and migrations live in `packages/`. The Android shell holds an encrypted local copy of the catalogue and an outbox for offline capture; a central connection is still required to sign in, so there is no offline authentication. No paid service or cloud connection is required to run the central application on a local network.
 
 ## What works now
 
@@ -16,9 +27,9 @@ The central computer runs a Node.js/Express API with a `better-sqlite3` authorit
 - Argon2id passwords, current-password-verified password changes, revocable sessions, CSRF/origin protection, rate limits, and persistent account lockout.
 - Seven seeded roles and backend-enforced permissions. Administrative writes recheck live grants and session validity inside their transaction.
 - Device registration, expiring pairing codes, authorized approval, proof-bound native sessions, and revocation.
-- Central SQLite database; shared, checksummed migrations for **49 tables** (eleven migrations); append-only application audit logs.
+- Central SQLite database; shared, checksummed migrations for **52 tables** (thirteen migrations, schema v13); append-only application audit logs.
 - Android SQLite/SQLCipher initialization, installation UUIDs, Keystore-backed secret storage, configurable server address, and lifecycle/network hooks.
-- Atomic local-write/outbox primitives, receipt deduplication, conflict snapshots and permission-gated aggregate queue diagnostics. **No transport worker or business handlers.**
+- Atomic local-write/outbox primitives, receipt deduplication, conflict snapshots, permission-gated aggregate queue diagnostics, and a working synchronization push with business handlers for sales, customers, debts, receipts, purchase orders and expenses.
 - Locally bundled Android assets and fonts. A production browser build can cache its **public shell only** on a secure origin; API responses are never cached.
 
 ### Sales and POS (Phase 3)
@@ -54,7 +65,16 @@ The central computer runs a Node.js/Express API with a `better-sqlite3` authorit
 - **Dashboard and reconciliation:** active products, stock value at cost, retail value shown separately, below-reorder, out-of-stock, expired, nearing expiry, recent movements, newest products, and cached-vs-ledger drift detection.
 - **Permissions:** 69 permissions in total, including 16 inventory, 9 healthcare and 12 Phase 5 finance permissions, enforced by the API. Cashiers get no inventory, purchasing, supplier-payment, expense or export access by default.
 
-See the [Phase 2 report](docs/PHASE_2_REPORT.md), [Phase 1 report](docs/PHASE_1_REPORT.md), [architecture](docs/ARCHITECTURE.md), [database](docs/DATABASE.md), [security](docs/SECURITY.md), [API](docs/API.md), and [Android guide](docs/ANDROID.md).
+### Offline work, backup and installation (Phase 6)
+
+- **Offline capture:** a paired Android phone keeps selling when the shop computer is unreachable. Each kept sale gets a provisional receipt (`OFF-20261110-0001`) and is written to the phone's encrypted local database.
+- **Synchronization:** the shop computer re-checks every kept record — installation fingerprint, device state, clock, stock, price and permissions — inside one transaction. A replay is recognised as a duplicate and changes nothing; anything unverifiable is rejected or parked as a conflict for a human, never forced through.
+- **Deliberate offline limits:** credit sales, discounts without `sales.discount`, and prescriptions cannot be completed offline.
+- **Backup and Sync page:** synchronization counters, records from connected devices, backup creation, per-file verification, and restore behind a typed confirmation. Backups are written with SQLite's snapshot mechanism and re-opened to verify integrity, checksum, row counts and schema version.
+- **Windows desktop application:** Electron shell around the same interface and the same API, one window, sandboxed, no remote content, database in `%APPDATA%\MediMart`. Portable — no installer, no Administrator rights, no internet.
+- **Android:** `com.medimart.app`, optional camera for barcode scanning only, release builds TLS-only, `scripts/build-apk.mjs` for a debug APK and environment-supplied release signing.
+
+See the [Phase 2 report](docs/PHASE_2_REPORT.md), [Phase 1 report](docs/PHASE_1_REPORT.md), [Phase 6 report](docs/PHASE_6_REPORT.md), [Phase 6 test results](docs/PHASE_6_TEST_RESULTS.md), [Phase 6 UAT script](docs/PHASE_6_UAT.md), [Phase 6 performance](docs/PHASE_6_PERFORMANCE.md), [architecture](docs/ARCHITECTURE.md), [database](docs/DATABASE.md), [security](docs/SECURITY.md), [API](docs/API.md), [Windows](docs/DESKTOP.md), and [Android guide](docs/ANDROID.md).
 
 ## Prerequisites
 
@@ -159,24 +179,24 @@ The API rejects insecure production cookie/origin settings. TLS termination, cer
 
 Android stores its server address in its own SQLite settings after the user configures it. Tokens and pairing secrets never go into that settings table.
 
-## Android foundation
+## Android and Windows builds
 
 Permanent application ID: **`com.medimart.app`**. Application name: **MediMart**.
 
 ```bash
-npm run android:sync
-npm run android:open
+# Android debug APK (needs JDK 21 + Android SDK 36)
+npm run android:apk                            # → dist/android/medimart-debug.apk
+
+# Windows portable desktop package (needs internet once, or MEDIMART_ELECTRON_DIR)
+npm run desktop:build                          # → dist/desktop/MediMart-win32-x64/ + zip
+
+# Application icons (only if you change the mark)
+node scripts/generate-icons.mjs
 ```
 
-On a machine with the required SDK/JDK installed:
-
-```bash
-cd apps/web/android
-./gradlew assembleDebug
-# Windows: gradlew.bat assembleDebug
-```
-
-Expected output **if the build succeeds**: `apps/web/android/app/build/outputs/apk/debug/app-debug.apk`.
+Both scripts refuse to claim a result they did not produce: if the JDK, SDK or Electron runtime is
+missing they say exactly that and exit non-zero. Built binaries belong in a GitHub release or workflow
+artifact — `dist/`, `*.apk` and `*.aab` are git-ignored.
 
 - `android:sync` builds and copies **release-safe bundled assets**; it does not compile an APK.
 - For explicit **private-LAN HTTP development only**, use `npm run android:sync:dev` and an Android **debug** build. Never distribute these assets as a release or use real credentials over HTTP.
@@ -184,7 +204,7 @@ Expected output **if the build succeeds**: `apps/web/android/app/build/outputs/a
 - On an authorized central browser: **Settings → Device pairing** → enter the phone's code → approve.
 - Back on the phone: check approval, then sign in with an individual account.
 
-See [Android setup and the remaining verification gate](docs/ANDROID.md). The manual Android GitHub workflow is provided but has **not** been executed here.
+See [Android setup and the remaining verification gate](docs/ANDROID.md) and the [Windows guide](docs/DESKTOP.md). The Android GitHub workflow is provided but has **not** been executed here.
 
 ## Quality checks
 
@@ -225,6 +245,7 @@ This is a test-only Linux fallback; it does not ship in the application. Web sec
 apps/
   api/
     src/                  Express composition, configuration, security middleware, services
+  desktop/                Electron shell (main.mjs) and application icons
   web/
     src/
       components/         Shared UI, shell, application/session provider
@@ -247,28 +268,40 @@ var/                      Local development DB (ignored)
 
 - Do not edit released migrations or their frozen seed snapshot. Add a new migration; checksum drift blocks startup.
 - Never synchronize password hashes, sessions, device secrets, or bootstrap tokens through the business outbox.
-- Do not copy a live SQLite file alone as a backup while WAL writes are in progress. There is no backup UI, restore tool or scheduled backup process. See the [database guide](docs/DATABASE.md).
+- Do not copy a live SQLite file alone as a backup while WAL writes are in progress. Use **Backup and Sync → Create backup now**, which writes a consistent snapshot, re-opens and verifies it. See the [database guide](docs/DATABASE.md).
 - Do not clear Android app data or uninstall to fix a connection error. This removes installation identity and local records.
-- A cached shell is **not** offline authentication. Disconnected clients do not receive protected privileges. Offline credential/lease policy and actual offline business operations need a separately approved phase.
-- Inventory, sales and Phase 5 writes are online-only: `product*`, `stock_*`, `supplier*`, `category*`, `unit*`, `product_batch*`, sales, purchase, receipt, supplier-payment and expense entities are denied by the business outbox. The stock ledger is authoritative; cached balances are compared by the reconciliation report, never silently overwritten.
+- A cached shell is **not** offline authentication. Disconnected browsers do not receive protected privileges. Offline capture exists only in the Android application, only for a device with an approved pairing and a valid individual session.
+- Catalogue, supplier, category and unit changes remain online-only; the offline outbox accepts sales, customers, debt repayments, stock receipts, purchase orders and expenses. Credit sales, unverified discounts and prescriptions are refused offline by design. The stock ledger is authoritative; cached balances are compared by the reconciliation report, never silently overwritten.
+- A backup contains the whole database, including password hashes. Keep the backup folder, and any USB copy, private.
 - Never store money as floating point. Amounts are integer kobo from form input through the database.
 - No paid services, public hosting, or cloud synchronization are required or configured.
 
-## Phase 6 progress and limitations
+## Phase 6 status and remaining limitations
 
-The Backup and Sync page reports the current connection and, when a connected session has `sync.view`, aggregate counts for the central queue or this Android installation's local queue. It never transmits, changes, retries or deletes operations. Its refresh action is **not** Sync Now. The API exposes counts only to authorized users; no payloads or conflict details are returned. A reachable server is not proof of synchronization. Without a live authenticated session the application does not grant access to these diagnostics, including when disconnected.
+Offline capture and synchronization, verified backup/restore, the Windows desktop package and the
+Android build pipeline are implemented in this phase. `/backup-sync` is a real page: it shows
+synchronization counters, records from connected devices, creates and verifies backups, and prepares a
+restore behind a typed confirmation.
 
-This is **not a completed offline-first implementation**: there is no offline login, catalogue download, offline sales, printing from offline data, payments, debts, patient access, prescription/dispensing sync, incoming updates, sync worker, server acknowledgement protocol, conflict resolution, Android backup or restore. All business operations require a central connection. The outbox denylist remains in place. The server address cannot be changed after enrollment; a safe rebind for changing IP addresses is not implemented. The API does not discover LAN addresses or produce QR codes. Pairing codes are generated on the phone and approved by an authorized central user, as described above. No local TLS, firewall or public-internet exposure protection is automatically provisioned; administrators must configure them.
+This is **not** a claim of production readiness:
 
-### Backup and recovery
+- The Windows window has **not** been launched on Windows, and **no APK has been compiled** in the
+  build environment. Both must be built and exercised on real hardware before real trading.
+- Offline mode is Android-only and deliberately limited: credit sales, unverified discounts and
+  prescriptions are refused offline.
+- A restore is applied only at the next controlled start, and requires the application to be closed.
+- No code signing, no Windows Installer, no automatic update. The local API is HTTP on loopback, and
+  HTTP on a private LAN only in the documented debug APK profile.
+- The central database is not encrypted at rest; it relies on Windows account permissions. Backups are
+  unencrypted files and must be kept private.
+- A paired Android installation cannot change servers; a safe rebind is not implemented.
+- There is no local TLS provisioning, firewall configuration or public-internet exposure protection;
+  an administrator must configure them.
 
-No in-app backup or restore is available. Before attempting recovery, stop use of the affected device and contact the administrator; do not uninstall, clear data, delete queue records or overwrite a potentially newer database. The Android database and Keystore keys must be preserved together; there is no verified Android export/recovery procedure. Protect central backups as sensitive clinical and financial information, and use a SQLite-aware consistent backup, not a copy of a live database without its WAL. Restoration should be done only after validating integrity on an isolated copy, preserving the original and explicitly assessing newer data. No automated integrity-validation or restoration workflow is supplied. See [database recovery boundaries](docs/DATABASE.md#backup-and-recovery-boundaries).
+See [`docs/PHASE_6_REPORT.md`](docs/PHASE_6_REPORT.md) for what was verified, what was not, and the
+full limitation list.
 
-### Remaining roadmap
-
-- **Phase 6:** complete and verify offline authorization, local domain operations, secure LAN synchronization, conflict handling, safe backups and real Android-device testing before deployment.
-- **Phase 7:** future scope to be defined and approved; not started here.
-- **Phase 8:** future owner-controlled cloud synchronization; not implemented and not required for local operations.
+**Stop after Phase 6.** Phase 7 has not been started.
 
 ## Third-party assets
 

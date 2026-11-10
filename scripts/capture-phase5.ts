@@ -39,6 +39,10 @@ const config: ApiConfig = {
   trustProxyHops: 0,
   sessionHours: 8,
   secureCookies: false,
+  backupDir: '.artifacts/backups',
+  managedDesktop: false,
+  desktopOrigins: [],
+  allowLanHttp: false,
   authRateLimit: 200,
 };
 const server = createApp(db, config, resolve('apps/web/dist')).listen(port, '0.0.0.0');

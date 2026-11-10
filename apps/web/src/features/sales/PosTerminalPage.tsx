@@ -31,7 +31,7 @@ import {
   type SaleDetail,
   type Prescription,
 } from '@medimart/shared';
-import { errorMessage } from '../../lib/api';
+import { ApiClientError, errorMessage } from '../../lib/api';
 import { useApp } from '../../lib/context';
 import { Badge, Button, FormError, Modal, PageHeading } from '../../components/ui';
 import {
@@ -52,6 +52,8 @@ import {
 } from '../inventory/shared';
 import { ReceiptDocument, type ReceiptPrintMode } from './ReceiptView';
 import { SalesAccessGate } from './SalesAccessGate';
+import { cacheCatalog, offlineAvailable, saveOfflineRecord } from '../../platform/offline';
+import { CameraScanButton, CameraScanner } from '../../components/CameraScanner';
 
 type CartLine = {
   key: string;
@@ -80,7 +82,7 @@ function createPaymentLeg(method: PaymentMethod = 'cash', amountInput = ''): Pay
 }
 
 export function PosTerminalPage() {
-  const { api, user, notify } = useApp();
+  const { api, user, notify, runtime, connection } = useApp();
   const navigate = useNavigate();
   const prescriptionId = new URLSearchParams(useLocation().search).get('prescriptionId');
   const [reviewedPrescription, setReviewedPrescription] = useState(false);
@@ -133,6 +135,7 @@ export function PosTerminalPage() {
   // Barcode scanner input
   const [scanCode, setScanCode] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
 
   // Cart & checkout state
@@ -154,6 +157,16 @@ export function PosTerminalPage() {
   const [notes, setNotes] = useState('');
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // A sale parked on this Android device because the shop computer was unreachable.
+  const [parkedSale, setParkedSale] = useState<{
+    receiptNumber: string | null;
+    totalKobo: number;
+  } | null>(null);
+  const [parking, setParking] = useState(false);
+  const [offlineOffer, setOfflineOffer] = useState<Parameters<typeof parkSaleOffline>[0] | null>(
+    null,
+  );
 
   // Completed sale receipt modal
   const [completedSale, setCompletedSale] = useState<SaleDetail | null>(null);
@@ -196,6 +209,12 @@ export function PosTerminalPage() {
         : Promise.resolve(null),
     [canAccess, debouncedSearch, typeFilter, categoryFilter, inStockOnly],
   );
+
+  // Keep an offline product snapshot on this device so a clerk can still sell while disconnected.
+  useEffect(() => {
+    if (!offlineAvailable(runtime) || !catalog.data || connection !== 'online') return;
+    void cacheCatalog(runtime, bootstrap.data?.shop.businessName ?? 'MediMart', catalog.data.items);
+  }, [runtime, connection, catalog.data, bootstrap.data]);
 
   const customersState = useAsync(
     () =>
@@ -267,9 +286,9 @@ export function PosTerminalPage() {
     setCheckoutError(null);
   }
 
-  async function handleBarcodeScan(event: FormEvent) {
-    event.preventDefault();
-    const trimmed = scanCode.trim();
+  /** Add one product to the cart by barcode/SKU. Used by the keyboard and camera paths. */
+  async function scanProductCode(code: string) {
+    const trimmed = code.trim();
     if (!trimmed) return;
     setScanning(true);
     try {
@@ -284,6 +303,11 @@ export function PosTerminalPage() {
     } finally {
       setScanning(false);
     }
+  }
+
+  async function handleBarcodeScan(event: FormEvent) {
+    event.preventDefault();
+    await scanProductCode(scanCode);
   }
 
   function updateLineUnit(lineKey: string, nextUnitId: string) {
@@ -438,7 +462,88 @@ export function PosTerminalPage() {
     setDueDate('');
     setNotes('');
     setCheckoutError(null);
+    setOfflineOffer(null);
     idempotencyRef.current = null;
+  }
+
+  /**
+   * Park a sale on the device when the shop computer cannot be reached.
+   * Only Android has the durable local store, and the server still validates every record later.
+   */
+  async function parkSaleOffline(corePayload: {
+    customerId: string | null;
+    items: Array<{
+      productId: string;
+      unitId: string;
+      quantity: number;
+      lineDiscountKobo: number;
+    }>;
+    cartDiscountKobo: number;
+    discountReason: string | null;
+    payments: Array<{ method: PaymentMethod; amountKobo: number; reference?: string | null }>;
+    dueDate: string | null;
+    notes: string | null;
+  }) {
+    if (!user) return;
+    if (!offlineAvailable(runtime)) {
+      setCheckoutError(
+        'Offline sales are only stored on the MediMart Android application. Reconnect to the shop computer to complete this sale.',
+      );
+      return;
+    }
+    if (prescriptionId) {
+      setCheckoutError(
+        'A prescription dispense needs the shop computer. Park only ordinary shop sales offline.',
+      );
+      return;
+    }
+    if (cartMath.discountTotalKobo > 0 && !canDiscountDirectly) {
+      setCheckoutError(
+        'A discount needs a supervisor verified by the shop computer. Complete this sale when you are connected.',
+      );
+      return;
+    }
+    if (paymentPreview.outstandingKobo > 0 && !customerId) {
+      setCheckoutError(
+        'A credit sale needs an existing customer chosen from the shop computer. Park only fully paid sales offline.',
+      );
+      return;
+    }
+    setParking(true);
+    try {
+      const saved = await saveOfflineRecord(
+        runtime,
+        {
+          recordType: 'sale',
+          requiresOnlineReview: false,
+          payload: {
+            customerId: customerId || null,
+            customerDraft: null,
+            items: corePayload.items,
+            cartDiscountKobo: corePayload.cartDiscountKobo,
+            discountReason: corePayload.discountReason,
+            payments: corePayload.payments.map((leg) => ({
+              method: leg.method,
+              amountKobo: leg.amountKobo,
+              reference: leg.reference ?? null,
+            })),
+            dueDate: corePayload.dueDate,
+            notes: corePayload.notes,
+          },
+        },
+        user.id,
+      );
+      setParkedSale({
+        receiptNumber: saved.receiptNumber,
+        totalKobo: cartMath.grandTotalKobo,
+      });
+      resetSaleWorkspace();
+      notify('Sale saved on this device. It will synchronize when you reconnect.', 'success');
+    } catch (caught) {
+      setCheckoutError(errorMessage(caught));
+    } finally {
+      setParking(false);
+    }
   }
 
   async function submitSale(event: FormEvent) {
@@ -525,7 +630,18 @@ export function PosTerminalPage() {
       customersState.reload();
       notify(`Sale ${sale.receiptNumber} completed.`, 'success');
     } catch (caught) {
-      setCheckoutError(errorMessage(caught));
+      const offline =
+        caught instanceof ApiClientError &&
+        ['CONNECTION_FAILED', 'SERVER_NOT_CONFIGURED'].includes(caught.code);
+      if (offline && offlineAvailable(runtime)) {
+        // The shop computer is unreachable: offer to keep the sale on this device.
+        setOfflineOffer(corePayload);
+        setCheckoutError(
+          'The shop computer is unreachable. You can keep this sale on this device and synchronize it later.',
+        );
+      } else {
+        setCheckoutError(errorMessage(caught));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -618,7 +734,16 @@ export function PosTerminalPage() {
           <Button type="submit" variant="secondary" busy={scanning}>
             Scan / Add
           </Button>
+          <CameraScanButton onClick={() => setCameraOpen(true)} />
         </form>
+        <CameraScanner
+          open={cameraOpen}
+          onClose={() => setCameraOpen(false)}
+          onDetected={(code) => {
+            setScanCode('');
+            void scanProductCode(code);
+          }}
+        />
       </section>
 
       <div className="pos-grid">
@@ -1354,6 +1479,77 @@ export function PosTerminalPage() {
 
             <div className="pos-modal-receipt-scroll">
               <ReceiptDocument sale={completedSale} mode={receiptMode} />
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Offline offer: the shop computer could not be reached. */}
+      <Modal
+        open={Boolean(offlineOffer)}
+        onClose={() => setOfflineOffer(null)}
+        title="Shop computer unreachable"
+      >
+        <div className="modal-form">
+          <p>
+            This sale could not be sent to the shop computer. You can keep it safely on this phone
+            and synchronize it later, or cancel and wait until the connection returns.
+          </p>
+          <p className="small muted">
+            The shop computer checks every kept sale again before it counts stock or money. Anything
+            it cannot verify will be listed for review instead of being forced through.
+          </p>
+          <div className="modal-actions">
+            <Button type="button" variant="secondary" onClick={() => setOfflineOffer(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={parking}
+              onClick={() => {
+                if (!offlineOffer) return;
+                const offer = offlineOffer;
+                setOfflineOffer(null);
+                void parkSaleOffline(offer);
+              }}
+            >
+              <Wallet size={15} /> Keep sale on this device
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Parked sale receipt */}
+      <Modal
+        open={Boolean(parkedSale)}
+        onClose={() => setParkedSale(null)}
+        title={
+          parkedSale?.receiptNumber
+            ? `Sale ${parkedSale.receiptNumber} kept on this device`
+            : 'Sale kept on this device'
+        }
+      >
+        {parkedSale && (
+          <div className="pos-completed-modal">
+            <div className="pos-completed-highlights">
+              <div>
+                <span>Grand total</span>
+                <strong>{formatMoney(parkedSale.totalKobo)}</strong>
+              </div>
+              <div>
+                <span>Synchronization</span>
+                <strong>Waiting</strong>
+              </div>
+            </div>
+            <p>
+              This sale is stored in this phone&rsquo;s encrypted database and survives an app
+              restart. It will be sent automatically when the phone reaches the shop computer. Write
+              the reference number above on the customer&rsquo;s slip.
+            </p>
+            <div className="modal-actions">
+              <Button type="button" onClick={() => setParkedSale(null)}>
+                Next customer
+              </Button>
             </div>
           </div>
         )}

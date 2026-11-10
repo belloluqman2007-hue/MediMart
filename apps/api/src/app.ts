@@ -5,7 +5,7 @@ import { rateLimit } from 'express-rate-limit';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import { readSyncStatus, type Database } from '@medimart/database';
+import type { Database } from '@medimart/database';
 import {
   approveDeviceSchema,
   businessSettingsSchema,
@@ -27,12 +27,27 @@ import { audit } from './services/audit';
 import { registerFinanceRoutes } from './routes/finance';
 import { registerInventoryRoutes } from './routes/inventory';
 import { registerSalesRoutes } from './routes/sales';
+import { registerSyncRoutes, type SyncRouteContext } from './routes/sync';
 import { readShopSettings, writeShopSettings } from './services/sales/common';
 const meta = (req: Request) => ({
   requestId: req.requestId,
   userAgent: req.get('user-agent') || '',
 });
-export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
+export type AppOptions = {
+  /**
+   * Folder for backup files, the live database path and the restore-request marker. They are
+   * supplied by the entry point so the desktop application can keep every user file in one
+   * persistent application-data directory.
+   */
+  paths?: Partial<SyncRouteContext>;
+};
+
+export function createApp(
+  db: Database,
+  config: ApiConfig,
+  webRoot?: string,
+  options: AppOptions = {},
+) {
   const app = express();
   const auth = new AuthService(db, config);
   const devices = new DeviceService(db);
@@ -88,7 +103,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
     });
   app.use(
     '/api',
-    limiter(300, 60_000),
+    limiter(config.apiRateLimit ?? 300, 60_000),
     originGuard(config),
     express.json({ limit: '64kb', strict: true }),
   );
@@ -121,7 +136,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   }
   app.get('/api/health', async (_req, res) => {
     await db.all('SELECT 1');
-    res.json({ status: 'ok', database: 'ready', phase: 5, sync: 'not_implemented' });
+    res.json({ status: 'ok', database: 'ready', phase: 6, sync: 'offline_capture' });
   });
   app.get('/api/auth/bootstrap-status', async (_req, res) => {
     res.json(await auth.bootstrapStatus());
@@ -269,18 +284,18 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
       ),
     });
   });
-  app.get('/api/sync/status', authenticated, requirePermission('sync.view'), async (_req, res) => {
-    const counts = await readSyncStatus(db);
-    res.json({
-      implemented: false,
-      ...counts,
-      message: 'Diagnostics only. No synchronization worker or business handlers are implemented.',
-    });
-  });
   registerInventoryRoutes(app, db, auth);
   registerSalesRoutes(app, db, auth);
   registerHealthcareRoutes(app, db, auth);
   registerFinanceRoutes(app, db, auth);
+  registerSyncRoutes(app, db, auth, config, {
+    backupDirectory: resolve(options.paths?.backupDirectory ?? config.backupDir),
+    databasePath: options.paths?.databasePath ?? config.databasePath,
+    restoreRequestFile: resolve(
+      options.paths?.restoreRequestFile ??
+        `${options.paths?.databasePath ?? config.databasePath}.restore-request`,
+    ),
+  });
   app.use('/api', () => {
     throw new ApiError(404, 'NOT_FOUND', 'This API endpoint does not exist.');
   });

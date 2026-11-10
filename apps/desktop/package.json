@@ -1,0 +1,11 @@
+{
+  "name": "@medimart/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MediMart Windows desktop application (Electron shell around the local server)",
+  "main": "main.mjs",
+  "type": "module",
+  "scripts": {
+    "pack": "node ../../scripts/build-desktop.mjs"
+  }
+}

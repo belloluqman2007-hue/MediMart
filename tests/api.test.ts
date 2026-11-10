@@ -22,6 +22,10 @@ const config: ApiConfig = {
   trustProxyHops: 0,
   sessionHours: 8,
   secureCookies: false,
+  backupDir: '.artifacts/backups',
+  managedDesktop: false,
+  desktopOrigins: [],
+  allowLanHttp: false,
 };
 const ownerBody = {
   fullName: 'Test Owner',
@@ -413,7 +417,7 @@ describe('authorization and API boundaries', () => {
     const health = await request(app).get('/api/health');
     expect(health.status).toBe(200);
     expect(health.headers['cache-control']).toBe('no-store');
-    expect(health.body.sync).toBe('not_implemented');
+    expect(health.body.sync).toBe('offline_capture');
   });
   it('rate limits expensive authentication attempts', async () => {
     for (let i = 0; i < 10; i++)
@@ -620,7 +624,10 @@ describe('sync diagnostics authorization', () => {
           .send({ email: staffBody.email, password: staffBody.password })
       ).status,
     ).toBe(200);
-    expect((await cashier.get('/api/sync/status')).status).toBe(403);
+    expect((await cashier.get('/api/sync/status')).status).toBe(200);
+    // A cashier may see the counters, but nothing that reveals a payload or another device's data.
+    const cashierStatus = await cashier.get('/api/sync/status');
+    expect(JSON.stringify(cashierStatus.body)).not.toContain('sensitive-value');
     const deviceId = crypto.randomUUID();
     await db.run("INSERT INTO devices (id,name,platform) VALUES (?,'Test','android')", [deviceId]);
     await commitLocalOperation(
@@ -638,13 +645,16 @@ describe('sync diagnostics authorization', () => {
     );
     const response = await owner.get('/api/sync/status');
     expect(response.status).toBe(200);
+    // Phase 6 replaced the diagnostics-only payload with the real offline-record counters. The
+    // authorization rule and the no-payload guarantee are what this test protects.
     expect(response.body).toMatchObject({
-      implemented: false,
-      pending: 1,
-      inFlight: 0,
-      failed: 0,
-      conflicted: 0,
-      openConflicts: 0,
+      protocolVersion: 1,
+      implemented: true,
+      pending: expect.any(Number),
+      synced: expect.any(Number),
+      rejected: expect.any(Number),
+      conflict: expect.any(Number),
+      device: null,
     });
     expect(JSON.stringify(response.body)).not.toContain('sensitive-value');
     expect(JSON.stringify(response.body)).not.toContain('payload');

@@ -5609,3 +5609,167 @@ kbd {
     padding: 24px;
   }
 }
+
+/* --- Phase 6: backup and synchronization ---------------------------------- */
+.backup-sync-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  margin-bottom: 18px;
+}
+.backup-sync-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.backup-sync-card header,
+.backup-help header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+.backup-sync-card header h2,
+.backup-help header h2 {
+  font-size: 1.05rem;
+  margin: 0 0 4px;
+}
+.backup-sync-card header p,
+.backup-help header p {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  margin: 0;
+}
+.backup-stat-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+}
+.backup-stat-list div {
+  background: var(--surface-sunken, #f6f8f7);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.backup-stat-list dt {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.backup-stat-list dd {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.backup-stat-list dd.backup-path {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.backup-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.backup-outcome {
+  align-items: center;
+  background: #eef8f1;
+  border-radius: 10px;
+  color: #1b5e33;
+  display: flex;
+  font-size: 0.86rem;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.backup-outcome.warn {
+  background: #fdf3e4;
+  color: #7a4a10;
+}
+.backup-warning {
+  align-items: center;
+  color: #7a4a10;
+  display: flex;
+  gap: 6px;
+  margin: 0;
+}
+.backup-help {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 18px;
+}
+@media (max-width: 640px) {
+  .backup-sync-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Phase 6: camera barcode scanning ------------------------------------- */
+.camera-scanner {
+  background: #0b1f19;
+  border-radius: 14px;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+}
+.camera-scanner-frame {
+  aspect-ratio: 4 / 3;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+}
+.camera-scanner-frame video {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.camera-scanner-reticle {
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  inset: 34% 14%;
+  position: absolute;
+}
+.camera-scanner-footer {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+.camera-scanner-footer .small {
+  color: rgba(255, 255, 255, 0.82);
+  margin: 0;
+}
+
+/* --- Phase 6: backup history table ---------------------------------------- */
+.backup-history td:first-child {
+  max-width: 320px;
+  min-width: 240px;
+}
+.backup-history code {
+  display: block;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.backup-history td,
+.backup-history th {
+  vertical-align: top;
+}
+.backup-sync-grid + .card,
+.backup-sync-grid ~ .card {
+  margin-top: 16px;
+}
+.backup-records .card-heading {
+  padding-bottom: 14px;
+}
+.backup-records > p {
+  padding: 0 21px 20px;
+  margin: 0;
+}

@@ -16,6 +16,10 @@ const config: ApiConfig = {
   trustProxyHops: 0,
   sessionHours: 8,
   secureCookies: false,
+  backupDir: '.artifacts/backups',
+  managedDesktop: false,
+  desktopOrigins: [],
+  allowLanHttp: false,
 };
 const origin = config.allowedOrigins[0]!;
 let db: Database,
