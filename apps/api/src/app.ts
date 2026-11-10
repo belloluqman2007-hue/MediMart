@@ -1,3 +1,4 @@
+import { registerHealthcareRoutes } from './routes/healthcare';
 import express, { type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
@@ -282,6 +283,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   });
   registerInventoryRoutes(app, db, auth);
   registerSalesRoutes(app, db, auth);
+  registerHealthcareRoutes(app, db, auth);
   registerFinanceRoutes(app, db, auth);
   app.use('/api', () => {
     throw new ApiError(404, 'NOT_FOUND', 'This API endpoint does not exist.');

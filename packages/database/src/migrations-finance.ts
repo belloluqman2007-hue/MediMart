@@ -11,7 +11,7 @@ import { kobo, timestamp, uuid } from './schema-helpers';
  * - Payments and reversals are append-only; allocations are never deleted.
  * - Every amount is INTEGER kobo; every quantity is INTEGER base units.
  *
- * Released migrations v1–v8 are never edited. This module adds v9 and v10.
+ * Released migrations v1–v9 are never edited. This module adds v10 and v11 after the Phase 4 healthcare migration.
  */
 const audited = `created_at ${timestamp}, updated_at ${timestamp}`;
 const actor = `created_by TEXT REFERENCES users(id) ON DELETE RESTRICT, updated_by TEXT REFERENCES users(id) ON DELETE RESTRICT, device_id TEXT REFERENCES devices(id) ON DELETE RESTRICT`;
@@ -21,7 +21,7 @@ const datePattern = (column: string) =>
   `${column} TEXT CHECK (${column} IS NULL OR ${column} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')`;
 
 const financeCore: Migration = {
-  version: 9,
+  version: 10,
   name: 'purchasing_receiving_supplier_payments_and_expenses',
   statements: [
     // --- Purchase orders (a commercial intent; never a stock or cash movement) ----
@@ -362,7 +362,7 @@ for (const category of expenseCategories) {
 }
 
 const financePermissionsAndExpenseCategories: Migration = {
-  version: 10,
+  version: 11,
   name: 'finance_permissions_and_expense_categories',
   statements,
 };

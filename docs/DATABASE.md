@@ -20,8 +20,9 @@ Both adapters enable foreign keys, WAL, `synchronous=FULL`, and a 5-second busy 
 | 6       | `inventory_below_cost_pricing`                        | Owner-level below-cost pricing permission and schema rebuild                                                           |
 | 7       | `sales_pos_payments_and_debts`                        | Customers, sales, sale lines, allocations, payments, refunds/voids, debts and debt repayments                          |
 | 8       | `sales_permissions_and_role_grants`                   | POS, discount, refund, debt and reporting permissions and grants                                                       |
-| 9       | `purchasing_receiving_supplier_payments_and_expenses` | Purchase orders/lines, goods receipts/lines, supplier payments/allocations, expense categories, expenses and reversals |
-| 10      | `finance_permissions_and_expense_categories`          | 12 Phase 5 permissions, role grants and 12 operating expense categories                                                |
+| 9       | `patients_consultations_prescriptions_dispensing`     | Patients, consultations, vitals, prescriptions, dispensing and the product clinical-warning field                      |
+| 10      | `purchasing_receiving_supplier_payments_and_expenses` | Purchase orders/lines, goods receipts/lines, supplier payments/allocations, expense categories, expenses and reversals |
+| 11      | `finance_permissions_and_expense_categories`          | 12 Phase 5 permissions, role grants and 12 operating expense categories                                                |
 
 The entire pending plan runs in a serialized `BEGIN IMMEDIATE` transaction. Each ledger entry has a UUID, version, name, SHA-256 checksum, and application timestamp. The runner checks contiguous versions, names and checksums, rejects newer/unknown databases, and checks foreign-key integrity before commit. Failed DDL and ledger writes roll back together.
 
@@ -72,6 +73,12 @@ All stored timestamps are UTC ISO-8601 strings. Mutating services explicitly upd
 `sale_reversal_items`, `customer_debts`, `debt_payments` and `receipt_counters`. Sales store
 integer-kobo totals and COGS; payments and reversals are append-only. Unpaid credit is never cash.
 
+## Healthcare tables (Phase 4, 7 tables)
+
+`patients`, `consultations`, `patient_vitals`, `prescriptions`, `prescription_items`,
+`prescription_dispensing` and `prescription_dispensing_allocations`. Clinical records are append-only
+where history matters; dispensing is exactly-once and links every allocation to the stock ledger.
+
 ## Finance tables (Phase 5, 9 tables)
 
 `purchase_orders`, `purchase_order_items`, `goods_receipts`, `goods_receipt_items`,
@@ -85,9 +92,9 @@ integer-kobo totals and COGS; payments and reversals are append-only. Unpaid cre
 - Supplier payments and their allocations are append-only. A reversal is a new payment row with
   `payment_kind = 'reversal'` and reversed (not deleted) allocations.
 - Expenses are versioned and cannot be deleted. Reversals are separate append-only records.
-- All money is INTEGER kobo; all quantities are INTEGER base units. Total: **42 tables**.
+- All money is INTEGER kobo; all quantities are INTEGER base units. Total: **49 tables**.
 - The stock ledger remains the source of truth and `stock_balances` remains a cache verified by
-  `/api/inventory/reconciliation`. Migrations 4–10 are forward-only and preserve existing records.
+  `/api/inventory/reconciliation`. Migrations 4–11 are forward-only and preserve existing records.
 
 ## Queue and conflict contract
 

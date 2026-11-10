@@ -1,10 +1,10 @@
 # Phase 5 — Purchasing, Supplier Payments, Expenses & Financial Management
 
-**Status:** implemented on `arena/d3e8b1fa-medimart`, ready for review. Phase 6 was not started.
+**Status:** implemented on `arena/d3e8b1fa-medimart`, integrated with the Phase 4 branch from `main`, ready for review. Phase 6 was not started.
 
-This phase extends the existing MediMart workspace without rebuilding Phases 1–3. Supplier records, products, units, batches, the stock ledger, sales, payments, debts and the existing UI patterns are reused. No existing data is deleted or reset by the new migrations.
+This phase extends the existing MediMart workspace without rebuilding Phases 1–4. Supplier records, products, units, batches, the stock ledger, sales, payments, debts, patient/prescription workflows and the existing UI patterns are reused. No existing data is deleted or reset by the new migrations.
 
-> **Phase 4 note:** no Phase 4 code, migration or report was present in the checkout this work started from (`a730f2b`). Phase 5 therefore builds on the existing Phase 3 sales/reporting implementation and preserves its behaviour. This is recorded again under **Known issues**.
+> **Phase 4 integration note:** no Phase 4 code was present when this branch started (`a730f2b`). Phase 4 landed on `main` during review and is merged here; migration versions were renumbered so healthcare is v9, finance core is v10 and finance permissions/categories are v11. Healthcare, sales, inventory and finance test suites all pass together.
 
 ---
 
@@ -128,7 +128,7 @@ Key constraints:
 - `expense_reversals` is append-only, one per expense, with an operation fingerprint.
 - Draft purchase lines can be replaced on update; the line table is intentionally not append-only. The order itself cannot be deleted.
 
-`tests/database.test.ts` now expects **42 tables** (23 before Phase 3 + 10 sales tables + 9 finance tables). Migration versions are contiguous and checksummed.
+`tests/database.test.ts` now expects **49 tables** (23 before Phase 3 + 10 sales tables + 7 healthcare tables + 9 finance tables). Migration versions are contiguous and checksummed.
 
 ---
 
@@ -237,7 +237,7 @@ All list endpoints return `{ items, page, pageSize, total, totalPages }`. Error 
 ### Tests and tooling
 
 - `tests/finance.test.ts` (new): 16 API/database integration tests covering all Phase 5 behaviours.
-- `tests/database.test.ts`: 42-table expectation.
+- `tests/database.test.ts`: 49-table expectation across Phase 1–5 migrations.
 - `tests/e2e/workspace.spec.ts`: extended timeout for the existing long financial-report WCAG scenario (no assertion changes).
 - `scripts/capture-phase5.ts` (new): disposable-database screenshot capture used for this report.
 - `docs/screenshots/phase5/` (new): eight screenshots.
@@ -270,15 +270,15 @@ Existing grants were not removed. Role grants use IDs starting at `31000000-0000
 
 ## 6. Tests executed and results
 
-| Command                   | Result                                                                                 |
-| ------------------------- | -------------------------------------------------------------------------------------- |
-| `npm run typecheck`       | Pass                                                                                   |
-| `npm run lint`            | Pass (0 errors, 0 warnings)                                                            |
-| `npm run format:check`    | Pass                                                                                   |
-| `npm run test`            | **115 passed** in 6 files (99 baseline + 16 Phase 5 integration tests)                 |
-| `npm run build`           | Pass (API + web; offline shell prepared)                                               |
-| `npm run test:production` | Pass (native SQLite startup, migrations, health, bundled assets, service worker, 404s) |
-| `npm run test:e2e`        | **18 passed** (Playwright, `MEDIMART_SANDBOX_BROWSER=1`, serial worker)                |
+| Command                   | Result                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| `npm run typecheck`       | Pass                                                                                      |
+| `npm run lint`            | Pass (0 errors, 0 warnings)                                                               |
+| `npm run format:check`    | Pass                                                                                      |
+| `npm run test`            | **122 passed** in 7 files (106 baseline including Phase 4 + 16 Phase 5 integration tests) |
+| `npm run build`           | Pass (API + web; offline shell prepared)                                                  |
+| `npm run test:production` | Pass (native SQLite startup, migrations, health, bundled assets, service worker, 404s)    |
+| `npm run test:e2e`        | **20 passed** (Playwright, `MEDIMART_SANDBOX_BROWSER=1`, serial worker)                   |
 
 The Phase 5 integration suite covers:
 
@@ -298,7 +298,7 @@ The Phase 5 integration suite covers:
 - Cashier/storekeeper permission boundaries.
 - Audit actions without credentials or CSRF material.
 
-The Playwright suite verifies the existing Phase 1–3 UI, the 20-item navigation, responsive layout, accessibility (WCAG A/AA), offline shell, POS sale/refund/debt flows, the separated sales report, and a runtime-error-free smoke pass across the new purchases, expenses, cash register and financial-report routes. The long financial-report scenario now has a 60-second test timeout because the added workspace assertions legitimately take longer on the sandbox browser.
+The Playwright suite verifies the existing Phase 1–3 UI, the 22-item navigation, Phase 4 patient/dispensing flows, responsive layout, accessibility (WCAG A/AA), offline shell, POS sale/refund/debt flows, the separated sales report, and a runtime-error-free smoke pass across the new purchases, expenses, cash register and financial-report routes. The long financial-report scenario now has a 60-second test timeout because the added workspace assertions legitimately take longer on the sandbox browser.
 
 ---
 
@@ -340,7 +340,7 @@ MEDIMART_SANDBOX_BROWSER=1 node --import=tsx scripts/capture-phase5.ts
 
 ## 9. Known issues and incomplete features
 
-1. **No Phase 4 artifact in the starting checkout.** Phase 4 code/migrations/reports were absent, so this phase builds directly on Phase 3 and cannot claim to preserve a Phase 4 implementation. If Phase 4 exists on another branch, reconcile before merging.
+1. **Phase 4 arrived after this branch started.** It is merged and renumbered, but the combined migration path (healthcare v9, finance v10/v11) should be reviewed as a unit before release.
 2. **Purchase-order PDF is not provided.** Reports and lists are printable and CSV-exportable, but there is no dedicated PO PDF template.
 3. **Expense attachments are intentionally small.** Base64 storage is capped at 48,000 characters (36 KB file); larger scans need external document storage, which is outside this phase.
 4. **Report inventory valuation is a live balance.** Stock at cost/retail reflects the current on-hand position for any selected period; COGS and movements are period-based.
@@ -354,8 +354,8 @@ MEDIMART_SANDBOX_BROWSER=1 node --import=tsx scripts/capture-phase5.ts
 
 ## Review checklist
 
-- [ ] Confirm Phase 4 reconciliation if a separate Phase 4 branch exists.
-- [ ] Review migration 9/10 DDL and the deliberate absence of a delete trigger on `purchase_order_items`.
+- [ ] Confirm the combined Phase 4 + Phase 5 migration order and role grants.
+- [ ] Review migration 10/11 DDL and the deliberate absence of a delete trigger on `purchase_order_items`.
 - [ ] Review supplier-payment and expense reversal semantics.
 - [ ] Confirm storekeeper `purchases.create/edit/receive` is the intended default.
 - [ ] Confirm the 36 KB attachment limit is acceptable.

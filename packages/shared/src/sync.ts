@@ -76,6 +76,17 @@ export const operationSchema = z
         'stock_adjustment',
         'stock_adjustments',
         // Phase 3 POS, sales, payments, customers, and debts tables remain server-validated.
+        // Clinical records never enter the generic unimplemented sync outbox.
+        'patient',
+        'patients',
+        'patient_vitals',
+        'consultation',
+        'consultations',
+        'prescription',
+        'prescriptions',
+        'prescription_items',
+        'prescription_dispensing',
+        'prescription_dispensing_allocations',
         'customer',
         'customers',
         'receipt_counter',

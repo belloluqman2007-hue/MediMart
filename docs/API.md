@@ -1,4 +1,4 @@
-# API — Phases 1 and 2
+# API — Phases 1–5
 
 Base path: `/api`. All important write inputs use strict shared Zod schemas. Send `Content-Type: application/json`; request-body limit is 64 KiB. Responses are `Cache-Control: no-store`.
 
@@ -35,9 +35,10 @@ State-changing origin checks apply independently of permissions. No frontend nav
 | `GET /audit-logs?limit=50`   | `audit.view`                                              | Read up to 100 immutable event records                              |
 | `GET /sync/status`           | `sync.view`                                               | Pending central queue count and explicit `implemented: false`       |
 
-Sales/POS, debts, purchasing, goods receiving, supplier payments, expenses and financial reporting
-endpoints exist (Phases 3 and 5). Prescriptions, patients, backup execution and push/pull sync
-endpoints do not. Unknown API paths return a JSON 404, not the SPA HTML.
+Inventory (Phase 2), sales/POS and debts (Phase 3), healthcare (Phase 4) and purchasing, supplier
+payments, expenses and financial reporting (Phase 5) endpoints exist. Backup execution and push/pull
+sync endpoints do not. Unknown API paths return a JSON 404, not the SPA HTML. Healthcare endpoint
+details are recorded in [`PHASE_4.md`](PHASE_4.md).
 
 ## Inventory endpoints (Phase 2)
 

@@ -2,7 +2,7 @@
 
 **Business, in good health.** A local-first foundation for pharmacy, mini-mart, and patient-management software.
 
-> **Phases 1–3 and 5 complete — ready for review, not business use.** Inventory, POS/sales, debts, purchasing, goods receiving, supplier payments, expenses and separated financial reporting are implemented. Healthcare modules (patients, consultations, prescriptions) and sync execution remain navigation placeholders. A Phase 4 artifact was not present in the checkout this work started from. **No APK has been built or verified in this environment.** See the [Phase 5 report](docs/PHASE_5_REPORT.md).
+> **Phases 1–5 complete — ready for review, not business use.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses and separated financial reporting are implemented. Backup/sync execution remains a navigation placeholder. **No APK has been built or verified in this environment.** See the [Phase 5 report](docs/PHASE_5_REPORT.md).
 
 ## What works now
 
@@ -12,7 +12,7 @@
 - Argon2id passwords, current-password-verified password changes, revocable sessions, CSRF/origin protection, rate limits, and persistent account lockout.
 - Seven seeded roles and backend-enforced permissions. Administrative writes recheck live grants and session validity inside their transaction.
 - Device registration, expiring pairing codes, authorized approval, proof-bound native sessions, and revocation.
-- Central SQLite database; shared, checksummed migrations for **42 tables** (ten migrations); append-only application audit logs.
+- Central SQLite database; shared, checksummed migrations for **49 tables** (eleven migrations); append-only application audit logs.
 - Android SQLite/SQLCipher initialization, installation UUIDs, Keystore-backed secret storage, configurable server address, and lifecycle/network hooks.
 - Atomic local-write/outbox primitives, receipt deduplication, and conflict snapshots. **No transport worker or business handlers.**
 - Locally bundled Android assets and fonts. A production browser build can cache its **public shell only** on a secure origin; API responses are never cached.
@@ -22,6 +22,13 @@
 - Product search/barcode scanning, cart quantities, unit conversions, FEFO batch allocation, split payments (cash, transfer, POS), change calculation and credit sales.
 - Customer credit limits, outstanding debts, partial/full repayments, void and partial/full refund flows with batch restoration.
 - Separated revenue, cash received, outstanding credit, COGS and gross profit; receipt printing and sales reports.
+
+### Healthcare (Phase 4)
+
+- Patient registration with duplicate detection, search, editable profiles and a chronological timeline.
+- Consultations and vitals with explicit, non-invented measurements; clinical history visible only to authorized healthcare roles.
+- Prescriptions with draft/authorize/cancel flow, allergy and clinical warnings, and FEFO dispensing that is exactly-once across prescription lines and the stock ledger.
+- Prescription checkout through the existing POS, retaining separated payments, stock and audit records.
 
 ### Purchasing and finance (Phase 5)
 
@@ -41,7 +48,7 @@
 - **Units:** 11 built-in units plus custom units and per-product conversions (for example 1 carton = 12 packs, 1 pack = 10 tablets) with integer base-unit arithmetic.
 - **Suppliers:** contact and business details, linked products, and stock-receiving history — no purchasing or payments.
 - **Dashboard and reconciliation:** active products, stock value at cost, retail value shown separately, below-reorder, out-of-stock, expired, nearing expiry, recent movements, newest products, and cached-vs-ledger drift detection.
-- **Permissions:** 60 permissions in total, including 16 inventory permissions and 12 Phase 5 finance permissions, enforced by the API. Cashiers get no inventory, purchasing, supplier-payment, expense or export access by default.
+- **Permissions:** 69 permissions in total, including 16 inventory, 9 healthcare and 12 Phase 5 finance permissions, enforced by the API. Cashiers get no inventory, purchasing, supplier-payment, expense or export access by default.
 
 See the [Phase 2 report](docs/PHASE_2_REPORT.md), [Phase 1 report](docs/PHASE_1_REPORT.md), [architecture](docs/ARCHITECTURE.md), [database](docs/DATABASE.md), [security](docs/SECURITY.md), [API](docs/API.md), and [Android guide](docs/ANDROID.md).
 

@@ -1,4 +1,5 @@
 import { financeMigrations } from './migrations-finance';
+import { healthcareMigrations } from './migrations-healthcare';
 import { inventoryMigrations } from './migrations-inventory';
 import { salesMigrations } from './migrations-sales';
 import { timestamp, uuid } from './schema-helpers';
@@ -174,5 +175,6 @@ export const migrations: readonly Migration[] = [
   { version: 3, name: 'least_privilege_role_seeds', statements: seeds },
   ...inventoryMigrations,
   ...salesMigrations,
+  ...healthcareMigrations,
   ...financeMigrations,
 ];

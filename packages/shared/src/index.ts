@@ -5,3 +5,4 @@ export * from './sales';
 export * from './sync';
 export * from './server-url';
 export * from './finance';
+export * from './healthcare';

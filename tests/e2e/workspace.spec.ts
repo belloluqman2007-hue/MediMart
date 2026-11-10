@@ -29,12 +29,12 @@ test('controlled first-owner setup works from the UI', async ({ page }) => {
   await page.reload();
   await expect(page.getByText('Your account is ready', { exact: true })).toBeVisible();
 });
-test('dashboard is honest, responsive, and has all 20 navigation entries', async ({ page }) => {
+test('dashboard is honest, responsive, and has all 22 navigation entries', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
-  await expect(page.locator('.sidebar-nav a')).toHaveCount(20);
+  await expect(page.locator('.sidebar-nav a')).toHaveCount(22);
   await expect(page.getByText('Not available yet', { exact: true })).toHaveCount(4);
   for (const width of [1440, 1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -50,7 +50,9 @@ test('module search, placeholders, and keyboard dialog controls work', async ({ 
   await page.getByRole('textbox', { name: 'Search modules' }).fill('prescriptions');
   await page.getByRole('dialog').getByRole('button', { name: 'Prescriptions Healthcare' }).click();
   await expect(page.getByRole('heading', { name: 'Prescriptions', exact: true })).toBeVisible();
-  await expect(page.getByText('No demo transactions', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Sign in to open this workspace', exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Notifications', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Notifications' })).toBeVisible();
   await page.keyboard.press('Escape');
@@ -417,4 +419,173 @@ test('owner opens the Phase 5 purchasing and finance workspaces without runtime 
     await page.waitForLoadState('networkidle');
   }
   expect(errors).toEqual([]);
+});
+
+test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async ({ page }) => {
+  test.setTimeout(90_000);
+  const bootstrap = await (await page.request.get('/api/auth/bootstrap-status')).json();
+  if (bootstrap.required) {
+    const registration = await page.request.post('/api/auth/register-owner', {
+      data: {
+        ...owner,
+        password: 'A fresh browser-only owner passphrase',
+        bootstrapToken: 'e2e-only-not-a-real-credential-00000000000000',
+      },
+    });
+    expect(registration.status()).toBe(201);
+    const registered = await registration.json();
+    await page.request.post('/api/auth/logout', {
+      headers: { 'X-CSRF-Token': registered.csrfToken },
+      data: {},
+    });
+  }
+  await signIn(page, { ...owner, password: 'A fresh browser-only owner passphrase' });
+  const session = await (await page.request.get('/api/auth/session')).json();
+  const post = (url: string, data: object) =>
+    page.request.post(url, { headers: { 'X-CSRF-Token': session.csrfToken }, data });
+  const clinical = {
+    fullName: 'Synthetic Clinical Professional',
+    email: 'clinical@synthetic.test',
+    password: 'Synthetic clinical passphrase 2026!',
+  };
+  const created = await post('/api/staff', {
+    ...clinical,
+    roles: ['healthcare_professional', 'pharmacist'],
+  });
+  expect(created.status()).toBe(201);
+  const units = await (await page.request.get('/api/units')).json();
+  const unit =
+    units.units?.find((u: { code: string }) => u.code === 'tablet') ??
+    units.find?.((u: { code: string }) => u.code === 'tablet');
+  expect(unit).toBeTruthy();
+  const product = await post('/api/products', {
+    name: 'Synthetic Clinical Medicine',
+    sku: 'SYNTH-E2E-MED',
+    productType: 'medicine',
+    purchaseCostKobo: 100,
+    sellingPriceKobo: 200,
+    reorderLevel: 0,
+    baseUnitId: unit.id,
+    isExpiryTracked: true,
+    status: 'active',
+    units: [],
+  });
+  expect(product.status()).toBe(201);
+  const productId = (await product.json()).id;
+  expect(
+    (
+      await post('/api/stock/receive', {
+        operationId: crypto.randomUUID(),
+        productId,
+        unitId: unit.id,
+        quantity: 20,
+        unitCostKobo: 100,
+        batchNumber: 'SYNTH-BATCH',
+        expiryDate: '2030-12-31',
+        reason: 'Synthetic browser test',
+      })
+    ).status(),
+  ).toBe(201);
+  await post('/api/auth/logout', {});
+  await page.reload();
+  await signIn(page, clinical);
+  await page.goto('/#/patients/new');
+  await page.getByLabel('Full name', { exact: true }).fill('Synthetic Patient Browser');
+  await page.getByLabel('Date of birth', { exact: true }).fill('1990-01-01');
+  await page.getByLabel('Phone number', { exact: true }).fill('0005550123');
+  await page
+    .getByLabel('Known allergies (record unknown or none known explicitly)')
+    .fill('Synthetic allergy — review required');
+  await page.screenshot({ path: 'docs/screenshots/phase4-registration.png', fullPage: true });
+  await page.getByRole('button', { name: 'Save patient', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Synthetic Patient Browser', exact: true }),
+  ).toBeVisible();
+  const patientId = page.url().split('/patients/')[1]!;
+  await page.getByText('Record vital signs', { exact: true }).click();
+  await page.getByLabel('Weight (kg)', { exact: true }).fill('80');
+  await page.getByLabel('Height (cm)', { exact: true }).fill('200');
+  await page.getByRole('button', { name: 'Save vital signs', exact: true }).click();
+  await expect(
+    page.getByText('BMI: 20 kg/m² (interpret for age and clinical context)', { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: 'docs/screenshots/phase4-profile.png', fullPage: true });
+  await page.getByRole('link', { name: 'New consultation', exact: true }).click();
+  await page
+    .getByLabel('Presenting complaints', { exact: true })
+    .fill('Synthetic complaint for workflow testing');
+  await page
+    .getByLabel('Assessment / documented clinical impression', { exact: true })
+    .fill('Synthetic professional documentation — not a diagnosis');
+  await page.getByLabel('Treatment plan', { exact: true }).fill('Synthetic plan for test only');
+  await page.screenshot({ path: 'docs/screenshots/phase4-consultation.png', fullPage: true });
+  await page.getByRole('button', { name: 'Save consultation', exact: true }).click();
+  await expect(
+    page.getByText('Synthetic complaint for workflow testing', { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole('link', { name: 'Create prescription for this consultation', exact: true })
+    .click();
+  await page
+    .getByLabel('Search medicine catalogue', { exact: true })
+    .fill('Synthetic Clinical Medicine');
+  await page.getByRole('combobox', { name: 'Add medicine', exact: true }).selectOption(productId);
+  for (const [label, value] of Object.entries({
+    Strength: '10mg',
+    Dosage: 'One tablet',
+    'Route of administration': 'Oral',
+    Frequency: 'Daily',
+    Duration: '10 days',
+    Instructions: 'Synthetic test only',
+  }))
+    await page.getByLabel(label, { exact: true }).fill(value);
+  await page.getByLabel('Quantity prescribed (base units)', { exact: true }).fill('10');
+  await page.getByRole('button', { name: 'Save prescription draft', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Prescription', exact: true })).toBeVisible();
+  await page
+    .getByLabel('I have reviewed current allergies, conditions and medicine warnings')
+    .check();
+  await page.getByRole('button', { name: 'Authorize prescription', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Complete dispensing', exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: 'docs/screenshots/phase4-prescription.png', fullPage: true });
+  await page
+    .getByLabel('Synthetic Clinical Medicine — quantity to dispense (base units)', { exact: true })
+    .fill('4');
+  await page.getByRole('button', { name: 'Confirm dispensing', exact: true }).click();
+  await expect(
+    page.getByText('Quantity prescribed: 10 base units · Dispensed: 4 · Remaining: 6', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.screenshot({ path: 'docs/screenshots/phase4-dispensing.png', fullPage: true });
+  const prescriptionUrl = page.url();
+  await page.getByRole('link', { name: 'Dispense and pay through POS', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Load remaining prescription into cart', exact: true })
+    .click();
+  await page
+    .getByLabel('I reviewed the current prescription, allergies and medicine warnings', {
+      exact: true,
+    })
+    .check();
+  await page.getByRole('button', { name: /Complete sale/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('MM-');
+  await page.goto(prescriptionUrl);
+  await expect(
+    page.getByText('Quantity prescribed: 10 base units · Dispensed: 10 · Remaining: 0', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.goto(`/#/patients/${patientId}`);
+  await expect(page.getByText('Patient timeline · Latest first', { exact: true })).toBeVisible();
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+  const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+  expect(axe.violations).toEqual([]);
 });

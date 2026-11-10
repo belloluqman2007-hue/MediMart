@@ -212,6 +212,7 @@ export function AppShell() {
           <div className="topbar-actions">
             <button
               className="search-trigger"
+              aria-label="Search workspace"
               onClick={() => {
                 setSearch('');
                 setSearchOpen(true);
