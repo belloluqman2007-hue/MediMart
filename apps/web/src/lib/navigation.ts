@@ -120,6 +120,22 @@ export const navigation: NavigationItem[] = [
     description: 'Support safer, more connected prescribing.',
   },
   {
+    path: '/dispensing',
+    label: 'Dispensing',
+    icon: Pill,
+    permission: 'prescriptions.dispense',
+    group: 'Healthcare',
+    description: 'Dispense authorized prescriptions using FEFO stock.',
+  },
+  {
+    path: '/patient-reports',
+    label: 'Patient Reports',
+    icon: HeartPulse,
+    permission: 'patients.reports',
+    group: 'Healthcare',
+    description: 'Patient and consultation activity.',
+  },
+  {
     path: '/expenses',
     label: 'Expenses',
     icon: Receipt,

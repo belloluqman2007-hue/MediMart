@@ -1,3 +1,7 @@
+import {
+  completePrescriptionCheckout,
+  protectClinicalSaleReversal,
+} from '../prescription-checkout';
 import type { Database, SqlExecutor } from '@medimart/database';
 import type {
   LedgerPaymentMethod,
@@ -451,6 +455,7 @@ export async function createSale(
   input: SaleCreateInput,
 ): Promise<{ sale: SaleDetail; replayed: boolean }> {
   const fingerprint = await operationHash('sale-create-v1', {
+    ...(input.prescription ? { prescription: input.prescription } : {}),
     customerId: input.customerId ?? null,
     items: input.items.map((item) => ({
       productId: item.productId,
@@ -468,6 +473,8 @@ export async function createSale(
     dueDate: input.dueDate ?? null,
     notes: input.notes ?? null,
   });
+
+  if (input.prescription) await assertPermission(db, auth, 'prescriptions.dispense');
 
   // Fast idempotency check before any Argon2id supervisor password verification.
   const preExisting = (
@@ -502,6 +509,7 @@ export async function createSale(
 
   return db.transaction(async (tx) => {
     await assertPermission(tx, auth, 'sales.create');
+    if (input.prescription) await assertPermission(tx, auth, 'prescriptions.dispense');
 
     const existing = (
       await tx.all<{ id: string; operation_fingerprint: string | null }>(
@@ -1053,6 +1061,17 @@ export async function createSale(
       },
     });
 
+    if (input.prescription)
+      await completePrescriptionCheckout(
+        tx,
+        auth,
+        requestId,
+        input.prescription.id,
+        saleId,
+        input.operationId,
+        fingerprint,
+        preparedLines,
+      );
     return { sale: await getSaleDetail(tx, saleId), replayed: false };
   });
 }
@@ -1072,6 +1091,7 @@ export async function voidSale(
 
   return db.transaction(async (tx) => {
     await assertPermission(tx, auth, 'sales.void');
+    await protectClinicalSaleReversal(tx, saleId);
 
     const existingRev = (
       await tx.all<{ sale_id: string; operation_fingerprint: string | null }>(
@@ -1367,6 +1387,7 @@ export async function refundSale(
 
   return db.transaction(async (tx) => {
     await assertPermission(tx, auth, 'sales.refund');
+    await protectClinicalSaleReversal(tx, saleId);
 
     const existingRev = (
       await tx.all<{ sale_id: string; operation_fingerprint: string | null }>(

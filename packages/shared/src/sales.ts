@@ -179,6 +179,10 @@ export type DiscountAuthorizationInput = z.infer<typeof discountAuthorizationSch
 
 export const saleCreateSchema = z
   .strictObject({
+    prescription: z
+      .object({ id: uuidSchema, reviewedWarnings: z.literal(true) })
+      .strict()
+      .optional(),
     operationId: uuidSchema,
     customerId: optionalUuid,
     items: z

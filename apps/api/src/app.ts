@@ -1,3 +1,4 @@
+import { registerHealthcareRoutes } from './routes/healthcare';
 import express, { type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
@@ -119,7 +120,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   }
   app.get('/api/health', async (_req, res) => {
     await db.all('SELECT 1');
-    res.json({ status: 'ok', database: 'ready', phase: 3, sync: 'not_implemented' });
+    res.json({ status: 'ok', database: 'ready', phase: 4, sync: 'not_implemented' });
   });
   app.get('/api/auth/bootstrap-status', async (_req, res) => {
     res.json(await auth.bootstrapStatus());
@@ -281,6 +282,7 @@ export function createApp(db: Database, config: ApiConfig, webRoot?: string) {
   });
   registerInventoryRoutes(app, db, auth);
   registerSalesRoutes(app, db, auth);
+  registerHealthcareRoutes(app, db, auth);
   app.use('/api', () => {
     throw new ApiError(404, 'NOT_FOUND', 'This API endpoint does not exist.');
   });

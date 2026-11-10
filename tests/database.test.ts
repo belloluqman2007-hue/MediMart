@@ -55,12 +55,19 @@ describe('SQLite schema and migrations', () => {
       'application_settings',
       'audit_logs',
       'categories',
+      'consultations',
       'customer_debts',
       'customers',
       'database_migrations',
       'debt_payments',
       'devices',
+      'patient_vitals',
+      'patients',
       'permissions',
+      'prescription_dispensing',
+      'prescription_dispensing_allocations',
+      'prescription_items',
+      'prescriptions',
       'product_batches',
       'product_units',
       'products',
@@ -266,7 +273,7 @@ describe('durable outbox and synchronization primitives (no sync engine)', () =>
     const internalTables = await db.all<{ name: string }>(
       "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     );
-    expect(internalTables).toHaveLength(33);
+    expect(internalTables).toHaveLength(40);
     for (const { name: entityType } of internalTables) {
       expect(operationSchema.safeParse(op({ entityType })).success, entityType).toBe(false);
     }
