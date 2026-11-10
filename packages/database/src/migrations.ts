@@ -1,3 +1,4 @@
+import { financeMigrations } from './migrations-finance';
 import { healthcareMigrations } from './migrations-healthcare';
 import { inventoryMigrations } from './migrations-inventory';
 import { salesMigrations } from './migrations-sales';
@@ -175,4 +176,5 @@ export const migrations: readonly Migration[] = [
   ...inventoryMigrations,
   ...salesMigrations,
   ...healthcareMigrations,
+  ...financeMigrations,
 ];

@@ -400,6 +400,27 @@ test('owner records a part-paid credit sale, settles customer debt, refunds an i
   }
 });
 
+test('owner opens the Phase 5 purchasing and finance workspaces without runtime errors', async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  await signIn(page, postChangeOwner);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const routes = [
+    ['/#/purchases', 'Purchase orders'],
+    ['/#/expenses', 'Operating expenses'],
+    ['/#/cash-register', 'Cash register'],
+    ['/#/reports/financial', 'Financial reports'],
+  ] as const;
+  for (const [route, heading] of routes) {
+    await page.goto(route);
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    await page.waitForLoadState('networkidle');
+  }
+  expect(errors).toEqual([]);
+});
+
 test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async ({ page }) => {
   test.setTimeout(90_000);
   const bootstrap = await (await page.request.get('/api/auth/bootstrap-status')).json();

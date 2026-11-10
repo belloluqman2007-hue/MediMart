@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
 import { hasPermission, productTypeLabels, type SalesReport } from '@medimart/shared';
 import { useApp } from '../../lib/context';
@@ -53,9 +54,14 @@ export function ReportsPage() {
         title="Sales &amp; financial reports"
         description="Sales revenue, cash actually received, unpaid credit, cost of goods sold, gross profit, and expenses are kept strictly separate."
         action={
-          <Button variant="secondary" onClick={report.reload} busy={report.loading}>
-            <RefreshCw size={15} /> Refresh
-          </Button>
+          <div className="row-actions">
+            <Link className="button button-primary" to="/reports/financial">
+              Financial reports
+            </Link>
+            <Button variant="secondary" onClick={report.reload} busy={report.loading}>
+              <RefreshCw size={15} /> Refresh
+            </Button>
+          </div>
         }
       />
 

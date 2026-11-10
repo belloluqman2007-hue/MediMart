@@ -2,7 +2,7 @@
 
 **Business, in good health.** A local-first foundation for pharmacy, mini-mart, and patient-management software.
 
-> **Phases 1 and 2 complete — ready for review, not business use.** Inventory management is implemented: products, categories, batches and expiry, the stock ledger, units and conversions, suppliers, the inventory dashboard, and reconciliation. The remaining modules (POS, sales, debts, purchasing, patients, consultations, prescriptions, expenses, reports) are still navigation placeholders. **No APK has been built or verified in this environment.**
+> **Phases 1–5 complete — ready for review, not business use.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses and separated financial reporting are implemented. Backup/sync execution remains a navigation placeholder. **No APK has been built or verified in this environment.** See the [Phase 5 report](docs/PHASE_5_REPORT.md).
 
 ## What works now
 
@@ -12,10 +12,32 @@
 - Argon2id passwords, current-password-verified password changes, revocable sessions, CSRF/origin protection, rate limits, and persistent account lockout.
 - Seven seeded roles and backend-enforced permissions. Administrative writes recheck live grants and session validity inside their transaction.
 - Device registration, expiring pairing codes, authorized approval, proof-bound native sessions, and revocation.
-- Central SQLite database; shared, checksummed migrations for **23 tables** (five migrations); append-only application audit logs.
+- Central SQLite database; shared, checksummed migrations for **49 tables** (eleven migrations); append-only application audit logs.
 - Android SQLite/SQLCipher initialization, installation UUIDs, Keystore-backed secret storage, configurable server address, and lifecycle/network hooks.
 - Atomic local-write/outbox primitives, receipt deduplication, and conflict snapshots. **No transport worker or business handlers.**
 - Locally bundled Android assets and fonts. A production browser build can cache its **public shell only** on a secure origin; API responses are never cached.
+
+### Sales and POS (Phase 3)
+
+- Product search/barcode scanning, cart quantities, unit conversions, FEFO batch allocation, split payments (cash, transfer, POS), change calculation and credit sales.
+- Customer credit limits, outstanding debts, partial/full repayments, void and partial/full refund flows with batch restoration.
+- Separated revenue, cash received, outstanding credit, COGS and gross profit; receipt printing and sales reports.
+
+### Healthcare (Phase 4)
+
+- Patient registration with duplicate detection, search, editable profiles and a chronological timeline.
+- Consultations and vitals with explicit, non-invented measurements; clinical history visible only to authorized healthcare roles.
+- Prescriptions with draft/authorize/cancel flow, allergy and clinical warnings, and FEFO dispensing that is exactly-once across prescription lines and the stock ledger.
+- Prescription checkout through the existing POS, retaining separated payments, stock and audit records.
+
+### Purchasing and finance (Phase 5)
+
+- **Purchases:** existing suppliers, multi-line orders, purchase units, integer-kobo discounts and charges, expected delivery dates, draft/ordered/partially received/received/cancelled statuses, search and date filters.
+- **Goods receiving:** partial deliveries, accepted/rejected quantities, batch and expiry capture, actual unit cost, atomic stock-ledger integration, duplicate-receipt prevention and expired-goods blocking.
+- **Supplier accounts:** received value, payments, outstanding invoices, statements and balances. Ordered but undelivered goods are never a payable.
+- **Supplier payments:** cash/transfer/POS, full or partial invoice allocations, duplicate-reference prevention, and append-only reversals.
+- **Expenses:** twelve operating categories, drafts, posting, attachments, audit records and reversals.
+- **Financial reporting:** separated sales, collections, purchases, expenses, inventory, COGS, gross profit and operating profit; daily/weekly/monthly ranges, CSV export, print layout and a sales-side cash register.
 
 ### Inventory (Phase 2)
 
@@ -26,7 +48,7 @@
 - **Units:** 11 built-in units plus custom units and per-product conversions (for example 1 carton = 12 packs, 1 pack = 10 tablets) with integer base-unit arithmetic.
 - **Suppliers:** contact and business details, linked products, and stock-receiving history — no purchasing or payments.
 - **Dashboard and reconciliation:** active products, stock value at cost, retail value shown separately, below-reorder, out-of-stock, expired, nearing expiry, recent movements, newest products, and cached-vs-ledger drift detection.
-- **Permissions:** 16 inventory permissions (39 total) enforced by the API; cashiers and healthcare accounts have no inventory access by default.
+- **Permissions:** 69 permissions in total, including 16 inventory, 9 healthcare and 12 Phase 5 finance permissions, enforced by the API. Cashiers get no inventory, purchasing, supplier-payment, expense or export access by default.
 
 See the [Phase 2 report](docs/PHASE_2_REPORT.md), [Phase 1 report](docs/PHASE_1_REPORT.md), [architecture](docs/ARCHITECTURE.md), [database](docs/DATABASE.md), [security](docs/SECURITY.md), [API](docs/API.md), and [Android guide](docs/ANDROID.md).
 
@@ -224,11 +246,11 @@ var/                      Local development DB (ignored)
 - Do not copy a live SQLite file alone as a backup while WAL writes are in progress. Phase 1 has no backup UI or scheduled backup process. See the [database guide](docs/DATABASE.md).
 - Do not clear Android app data or uninstall to fix a connection error. This removes installation identity and local records.
 - A cached shell is **not** offline authentication. Disconnected clients do not receive protected privileges. Offline credential/lease policy and actual offline business operations need a separately approved phase.
-- Inventory writes are online-only in Phase 2: `product*`, `stock_*`, `supplier*`, `category*`, `unit*`, and `product_batch*` entities are denied by the business outbox. The stock ledger is authoritative; cached balances are compared by the reconciliation report, never silently overwritten.
+- Inventory, sales and Phase 5 writes are online-only: `product*`, `stock_*`, `supplier*`, `category*`, `unit*`, `product_batch*`, sales, purchase, receipt, supplier-payment and expense entities are denied by the business outbox. The stock ledger is authoritative; cached balances are compared by the reconciliation report, never silently overwritten.
 - Never store money as floating point. Amounts are integer kobo from form input through the database.
 - No paid services, public hosting, or cloud synchronization are required or configured.
 
-**Stop after Phase 2. Phase 3 begins only after the owner reviews `docs/PHASE_2_REPORT.md` and explicitly approves it.**
+**Stop after Phase 5. Phase 6 begins only after the owner reviews `docs/PHASE_5_REPORT.md` and explicitly approves it.**
 
 ## Third-party assets
 

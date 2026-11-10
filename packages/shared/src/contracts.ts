@@ -91,7 +91,7 @@ export type SessionResponse = {
   csrfToken?: string;
   token?: string;
 };
-export type HealthResponse = { status: 'ok'; database: 'ready'; phase: 3; sync: 'not_implemented' };
+export type HealthResponse = { status: 'ok'; database: 'ready'; phase: 5; sync: 'not_implemented' };
 export type BootstrapStatus = { required: boolean; enabled: boolean };
 export type DeviceSummary = {
   id: string;

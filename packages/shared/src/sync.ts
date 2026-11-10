@@ -107,6 +107,26 @@ export const operationSchema = z
         'customer_debts',
         'debt_payment',
         'debt_payments',
+        // Phase 5 purchasing, supplier payments, expenses and finance tables stay
+        // server-validated and are never writable through the generic business outbox.
+        'purchase_order',
+        'purchase_orders',
+        'purchase_order_item',
+        'purchase_order_items',
+        'goods_receipt',
+        'goods_receipts',
+        'goods_receipt_item',
+        'goods_receipt_items',
+        'supplier_payment',
+        'supplier_payments',
+        'supplier_payment_allocation',
+        'supplier_payment_allocations',
+        'expense',
+        'expenses',
+        'expense_category',
+        'expense_categories',
+        'expense_reversal',
+        'expense_reversals',
       ].includes(op.entityType)
     ) {
       ctx.addIssue({

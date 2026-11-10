@@ -52,7 +52,7 @@ Pairing is a trust foundation, **not hardware attestation**. Browser sign-in wit
 
 ### Inventory (Phase 2)
 
-- 16 inventory permissions were added (39 total): `inventory.view`, `inventory.reports.view`,
+- Phase 2 added 16 inventory permissions (39 total at that point): `inventory.view`, `inventory.reports.view`,
   `inventory.settings.manage`, `products.create`, `products.edit`, `products.deactivate`,
   `categories.manage`, `units.manage`, `batches.view`, `batches.manage`, `stock.view`,
   `stock.receive`, `stock.adjust`, `stock.write_off`, `suppliers.view`, `suppliers.manage`.
@@ -71,6 +71,26 @@ Pairing is a trust foundation, **not hardware attestation**. Browser sign-in wit
 - Audit detail rows are sanitised — no password, token, pairing secret, or device secret is written.
 - Money is stored and validated as integer kobo, which also removes floating-point rounding risk
   from stock valuation.
+
+### Purchasing and finance (Phase 5)
+
+- Phase 5 adds 12 backend-enforced permissions: `purchases.create`, `purchases.edit`,
+  `purchases.cancel`, `purchases.receive`, `supplier_payments.view`, `supplier_payments.record`,
+  `supplier_payments.reverse`, `supplier_debts.view`, `expenses.create`, `expenses.edit`,
+  `expenses.reverse` and `reports.export`.
+- Managers, administrators and the owner receive all 12. Storekeepers receive only
+  `purchases.create`, `purchases.edit` and `purchases.receive`. Cashiers and healthcare roles receive
+  none; cashiers keep the pre-existing sales-side `cash_register.view` only.
+- Receiving checks `purchases.receive` and `stock.receive` together. Supplier accounts and statements
+  require `supplier_debts.view`; exporting reports requires `reports.export`, separate from viewing.
+- Purchase, receipt, supplier-payment, reversal and expense writes are audited with actor, device,
+  request ID, entity and business metadata. Credentials, tokens and CSRF values are never logged.
+- Financial history is append-only where it matters: supplier payments and recorded expenses are
+  corrected by reversal records, not deletion. Purchase lines may be replaced only while the order
+  is a draft; orders themselves are cancelled or reversed, never deleted.
+- All finance amounts are integer kobo validated by Zod and database `CHECK` constraints. Receiving
+  is one transaction covering receipts, items, batches, ledger movements, purchase quantities and
+  audit rows, so a failure cannot leave partial stock.
 
 ## Transport deployment
 

@@ -19,15 +19,18 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingBag,
+  ShoppingCart,
   Smartphone,
   Sparkles,
   Store,
   Users,
+  Wallet,
   Wifi,
   WifiOff,
 } from 'lucide-react';
 import {
   hasPermission,
+  type FinancialDashboardSummary,
   type InventoryDashboard,
   type SalesDashboardSummary,
 } from '@medimart/shared';
@@ -99,6 +102,7 @@ export function Dashboard() {
   const userId = user?.id;
   const canSeeInventory = Boolean(user && hasPermission(user.permissions, 'inventory.view'));
   const canSeeSales = Boolean(user && hasPermission(user.permissions, 'sales.view'));
+  const canSeeFinance = Boolean(user && hasPermission(user.permissions, 'reports.view'));
   const [loaded, setLoaded] = useState<{ userId: string; data: InventoryDashboard | null } | null>(
     null,
   );
@@ -106,10 +110,16 @@ export function Dashboard() {
     userId: string;
     data: SalesDashboardSummary | null;
   } | null>(null);
+  const [financeLoaded, setFinanceLoaded] = useState<{
+    userId: string;
+    data: FinancialDashboardSummary | null;
+  } | null>(null);
   // Only the signed-in owner of the fetched figures may see them; stale results are ignored.
   const inventory = canSeeInventory && loaded && loaded.userId === userId ? loaded.data : null;
   const sales =
     canSeeSales && salesLoaded && salesLoaded.userId === userId ? salesLoaded.data : null;
+  const finance =
+    canSeeFinance && financeLoaded && financeLoaded.userId === userId ? financeLoaded.data : null;
   useEffect(() => {
     if (!canSeeInventory || !userId) return;
     let active = true;
@@ -125,6 +135,24 @@ export function Dashboard() {
       active = false;
     };
   }, [api, canSeeInventory, userId]);
+  useEffect(() => {
+    if (!canSeeFinance || !userId) return;
+    let active = true;
+    const now = new Date();
+    const from = `${now.toISOString().slice(0, 7)}-01`;
+    const to = now.toISOString().slice(0, 10);
+    void api
+      .request<FinancialDashboardSummary>(`/api/finance/dashboard?from=${from}&to=${to}`)
+      .then((data) => {
+        if (active) setFinanceLoaded({ userId, data });
+      })
+      .catch(() => {
+        if (active) setFinanceLoaded({ userId, data: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, canSeeFinance, userId]);
   useEffect(() => {
     if (!canSeeSales || !userId) return;
     let active = true;
@@ -242,7 +270,7 @@ export function Dashboard() {
           </div>
         </div>
         <div className="banner-phase">
-          PHASE 03 <span>POS &amp; SALES</span>
+          PHASE 05 <span>PURCHASING &amp; FINANCE</span>
         </div>
       </section>
       <div className="section-title">
@@ -366,6 +394,78 @@ export function Dashboard() {
                 </div>
               </>
             )}
+          </div>
+        </section>
+      )}
+      {finance && (
+        <section className="card inventory-card" aria-label="Financial overview for this month">
+          <div className="card-heading">
+            <div>
+              <h2>Financial overview · this month</h2>
+              <p>
+                Sales, collections, purchases, supplier debt, expenses and operating profit stay
+                separate. Profit accounts for stock cost, not purchase totals.
+              </p>
+            </div>
+            <div className="row-actions">
+              <Link to="/purchases" className="button button-secondary">
+                <ShoppingCart size={15} /> Purchases
+              </Link>
+              <Link to="/reports/financial" className="button button-primary">
+                Financial reports
+              </Link>
+            </div>
+          </div>
+          <div className="inventory-metrics" style={{ margin: '0 21px' }}>
+            <div className="inventory-metric green">
+              <span className="muted small">Net sales revenue</span>
+              <div className="metric-value">{formatMoney(finance.sales.netSalesRevenueKobo)}</div>
+              <small className="muted">{finance.sales.transactionsCount} sales this month</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Money collected</span>
+              <div className="metric-value">
+                {formatMoney(finance.collections.totalReceivedKobo)}
+              </div>
+              <small className="muted">Cash, transfer, POS and debt repayments</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Goods received</span>
+              <div className="metric-value">{formatMoney(finance.purchases.goodsReceivedKobo)}</div>
+              <small className="muted">
+                {formatMoney(finance.purchases.totalOrderedKobo)} ordered
+              </small>
+            </div>
+            <div className="inventory-metric amber">
+              <span className="muted small">Owed to suppliers</span>
+              <div className="metric-value">
+                {formatMoney(finance.purchases.outstandingSupplierBalanceKobo)}
+              </div>
+              <small className="muted">
+                {finance.purchases.outstandingInvoiceCount} open invoices
+              </small>
+            </div>
+            <div className="inventory-metric red">
+              <span className="muted small">Operating expenses</span>
+              <div className="metric-value">{formatMoney(finance.expenses.netKobo)}</div>
+              <small className="muted">Excludes drafts and reversed expenses</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Operating profit</span>
+              <div className="metric-value">
+                {formatMoney(finance.profitability.operatingProfitKobo)}
+              </div>
+              <small className="muted">Net sales − COGS − operating expenses</small>
+            </div>
+            <div className="inventory-metric">
+              <span className="muted small">Stock at cost</span>
+              <div className="metric-value">
+                {formatMoney(finance.inventory.stockValueCostKobo)}
+              </div>
+              <small className="muted">
+                <Wallet size={12} /> {finance.inventory.stockUnits} units on hand
+              </small>
+            </div>
           </div>
         </section>
       )}

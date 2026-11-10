@@ -37,7 +37,11 @@ export function AppShell() {
   const searchRef = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const current = navigation.find((item) => item.path === location.pathname);
+  const current =
+    navigation.find((item) => item.path === location.pathname) ??
+    navigation
+      .filter((item) => item.path !== '/' && location.pathname.startsWith(`${item.path}/`))
+      .sort((a, b) => b.path.length - a.path.length)[0];
   const online = connection === 'online';
   useEffect(() => {
     document.title = `${current?.label || 'Workspace'} · MediMart`;

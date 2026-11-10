@@ -61,6 +61,11 @@ describe('SQLite schema and migrations', () => {
       'database_migrations',
       'debt_payments',
       'devices',
+      'expense_categories',
+      'expense_reversals',
+      'expenses',
+      'goods_receipt_items',
+      'goods_receipts',
       'patient_vitals',
       'patients',
       'permissions',
@@ -71,6 +76,8 @@ describe('SQLite schema and migrations', () => {
       'product_batches',
       'product_units',
       'products',
+      'purchase_order_items',
+      'purchase_orders',
       'receipt_counters',
       'role_permissions',
       'roles',
@@ -83,6 +90,8 @@ describe('SQLite schema and migrations', () => {
       'stock_adjustments',
       'stock_balances',
       'stock_movements',
+      'supplier_payment_allocations',
+      'supplier_payments',
       'suppliers',
       'sync_conflicts',
       'sync_devices',
@@ -273,7 +282,7 @@ describe('durable outbox and synchronization primitives (no sync engine)', () =>
     const internalTables = await db.all<{ name: string }>(
       "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     );
-    expect(internalTables).toHaveLength(40);
+    expect(internalTables).toHaveLength(49);
     for (const { name: entityType } of internalTables) {
       expect(operationSchema.safeParse(op({ entityType })).success, entityType).toBe(false);
     }
