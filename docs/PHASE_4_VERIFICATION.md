@@ -84,7 +84,7 @@ The full existing API/database/inventory/sales/platform suites passed, including
 
 The smoke runner launches the **compiled API entry point**, serves the **production-built web assets**, and migrates a disposable SQLite database. It verifies health, native SQLite, UI/assets, service-worker availability, JSON/asset 404 boundaries, unauthenticated clinical access denial, controlled synthetic owner/staff setup, synthetic patient/consultation/vital registration, prescription authorization, partial dispensing with existing POS payment, idempotent sale replay and final direct dispensing.
 
-This is sandbox production-artifact verification with the existing test-mode transport configuration. It is **not** a live deployment, TLS/hosting certification, professional clinical certification or verification against real production data. No Vercel deployment or real patient database was changed.
+This is sandbox production-artifact verification with the existing test-mode transport configuration. It is **not** a live deployment, TLS/hosting certification, professional clinical certification or verification against real production data. No real patient database was accessed or changed. Automated hosting previews triggered by pushing the pull request are not a clinical backend deployment verification.
 
 ## 8. Screenshots
 
