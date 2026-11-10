@@ -15,8 +15,6 @@ import type {
   FinancialReportKind,
   FinancialReportPeriod,
   InventoryFinancials,
-  InventoryValuation,
-  InventoryValuationRow,
   PaymentMethod,
   ProfitFinancials,
   PurchaseFinancials,
@@ -27,6 +25,7 @@ import type {
 import { financialReportLabels } from '@medimart/shared';
 import { ApiError } from '../../errors';
 import { todayIso } from '../inventory/common';
+import { inventoryValuation } from '../inventory/valuation';
 import { supplierBalanceSnapshot } from './accounts';
 import { buildCsv, dateRangeIso, reportWindow } from './common';
 import { expenseSelect, mapExpense, type ExpenseRow } from './expenses';
@@ -328,68 +327,6 @@ async function expenseFinancials(
     expenseCount: Number(gross.count),
     byCategory,
     byDate,
-  };
-}
-
-type ValuationRow = {
-  product_id: string;
-  product_name: string;
-  sku: string | null;
-  base_unit_symbol: string;
-  stock_quantity: number;
-  is_expiry_tracked: number;
-  batch_remaining: number;
-  batch_cost_value: number;
-  purchase_cost_kobo: number;
-  selling_price_kobo: number;
-};
-
-async function inventoryValuation(db: SqlExecutor): Promise<InventoryValuation> {
-  const rows = await db.all<ValuationRow>(
-    `SELECT p.id AS product_id, p.name AS product_name, p.sku, u.symbol AS base_unit_symbol,
-      COALESCE(b.quantity,0) AS stock_quantity, p.is_expiry_tracked,
-      COALESCE(batch.remaining,0) AS batch_remaining,
-      COALESCE(batch.cost_value,0) AS batch_cost_value,
-      p.purchase_cost_kobo, p.selling_price_kobo
-    FROM products p
-    JOIN units u ON u.id = p.base_unit_id
-    LEFT JOIN stock_balances b ON b.product_id = p.id
-    LEFT JOIN (
-      SELECT product_id, SUM(quantity_remaining) AS remaining,
-        SUM(quantity_remaining * purchase_cost_kobo) AS cost_value
-      FROM product_batches GROUP BY product_id
-    ) batch ON batch.product_id = p.id
-    WHERE p.deleted_at IS NULL AND COALESCE(b.quantity,0) > 0
-    ORDER BY p.name ASC`,
-  );
-  let totalCost = 0;
-  let totalRetail = 0;
-  let totalUnits = 0;
-  const mapped: InventoryValuationRow[] = rows.map((row) => {
-    const stock = Number(row.stock_quantity);
-    const batchRemaining = Number(row.batch_remaining);
-    const unbatched = Math.max(0, stock - batchRemaining);
-    const costValue = Number(row.batch_cost_value) + unbatched * Number(row.purchase_cost_kobo);
-    const retailValue = stock * Number(row.selling_price_kobo);
-    totalCost += costValue;
-    totalRetail += retailValue;
-    totalUnits += stock;
-    return {
-      productId: row.product_id,
-      productName: row.product_name,
-      sku: row.sku,
-      baseUnitSymbol: row.base_unit_symbol,
-      stockQuantity: stock,
-      batchTracked: Number(row.is_expiry_tracked) === 1 || batchRemaining > 0,
-      costValueKobo: costValue,
-      retailValueKobo: retailValue,
-    };
-  });
-  return {
-    rows: mapped,
-    totalCostKobo: totalCost,
-    totalRetailKobo: totalRetail,
-    totalUnits,
   };
 }
 

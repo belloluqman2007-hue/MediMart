@@ -2,7 +2,7 @@
 
 **Business, in good health.** A local-first foundation for pharmacy, mini-mart, and patient-management software.
 
-> **Phases 1–6 complete — ready for review, not business use yet.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses, separated financial reporting, offline capture and synchronization, and verified backup/restore are implemented. A Windows desktop package and an Android APK build pipeline exist. **Read the honest limits before relying on this:** the Windows window has not been launched on Windows and no APK has been compiled in this environment. See the [Phase 6 report](docs/PHASE_6_REPORT.md).
+> **Phases 1–7 complete — ready for review, not business use yet.** Inventory, POS/sales, debts, patient records, consultations, prescriptions/dispensing, purchasing, goods receiving, supplier payments, expenses, separated financial reporting, offline capture and synchronization, and verified backup/restore are implemented. Phase 7 unified stock valuation on actual batch acquisition costs, rebuilt the Windows packaging so it carries the full runtime and verified native addons, updated [docs/API.md](docs/API.md), and added GitHub Actions workflows that build and smoke-test the **Android APK** and the **Windows application** on real Windows/Android CI runners. **Read the honest limits before relying on this:** no physical Android phone or target HP laptop has been tested in this environment. See the [Phase 7 report](docs/PHASE_7_REPORT.md).
 
 ### Install it in the shop
 
@@ -204,7 +204,7 @@ artifact — `dist/`, `*.apk` and `*.aab` are git-ignored.
 - On an authorized central browser: **Settings → Device pairing** → enter the phone's code → approve.
 - Back on the phone: check approval, then sign in with an individual account.
 
-See [Android setup and the remaining verification gate](docs/ANDROID.md) and the [Windows guide](docs/DESKTOP.md). The Android GitHub workflow is provided but has **not** been executed here.
+See [Android setup and the remaining verification gate](docs/ANDROID.md) and the [Windows guide](docs/DESKTOP.md). Both applications are built and verified by GitHub Actions — `Android debug verification` (APK + emulator launch) and `Windows desktop application` (portable zip + packaged smoke test on `windows-latest`). The APK and Windows zip appear as workflow artifacts; they are never committed to the repository.
 
 ## Quality checks
 
@@ -276,17 +276,33 @@ var/                      Local development DB (ignored)
 - Never store money as floating point. Amounts are integer kobo from form input through the database.
 - No paid services, public hosting, or cloud synchronization are required or configured.
 
-## Phase 6 status and remaining limitations
+## Phase 7 status and remaining limitations
 
-Offline capture and synchronization, verified backup/restore, the Windows desktop package and the
-Android build pipeline are implemented in this phase. `/backup-sync` is a real page: it shows
-synchronization counters, records from connected devices, creates and verifies backups, and prepares a
-restore behind a typed confirmation.
+Phase 7 (final testing, packaging and release preparation) did the following:
+
+- **Stock valuation unified.** `/api/inventory/dashboard`, the product list and `/api/reports/finance`
+  now value stock one way: actual batch acquisition cost where batch cost data exists, product cost
+  price only for quantities with no batch record. Historical COGS is never restated. Regression
+  tests in `tests/valuation.test.ts` pin the rule; the accounting treatment is documented in
+  `apps/api/src/services/inventory/valuation.ts` and the Phase 7 report.
+- **Windows packaging fixed and verified.** `scripts/build-desktop.mjs` now stages the full runtime
+  module closure (the Phase 6 script missed transitive dependencies such as `body-parser`), checks
+  that loadable win32-x64 native addons are present, and runs cross-platform. The `Windows desktop
+application` workflow builds the portable zip on `windows-latest`, runs the whole test suite on
+  Windows, smoke-tests the packaged server through the exact `ELECTRON_RUN_AS_NODE` runtime path,
+  and launches the window for a screenshot.
+- **Android APK built by CI.** The `Android debug verification` workflow compiles
+  `com.medimart.app`, verifies package id/permissions/versions and the absence of embedded secrets,
+  then installs and launches the APK in an Android emulator with a screenshot.
+- **Documentation.** [docs/API.md](docs/API.md) documents every implemented endpoint, including the
+  backup and synchronization APIs that earlier drafts wrongly described as missing.
 
 This is **not** a claim of production readiness:
 
-- The Windows window has **not** been launched on Windows, and **no APK has been compiled** in the
-  build environment. Both must be built and exercised on real hardware before real trading.
+- The Windows application is verified on a GitHub-hosted Windows runner (build, full test suite,
+  packaged smoke test, window launch) — **not** on the target HP Stream 11 Pro, and not by a human
+  clicking through it.
+- The Android APK is verified by CI and an emulator — **not** on a physical phone.
 - Offline mode is Android-only and deliberately limited: credit sales, unverified discounts and
   prescriptions are refused offline.
 - A restore is applied only at the next controlled start, and requires the application to be closed.
@@ -298,10 +314,8 @@ This is **not** a claim of production readiness:
 - There is no local TLS provisioning, firewall configuration or public-internet exposure protection;
   an administrator must configure them.
 
-See [`docs/PHASE_6_REPORT.md`](docs/PHASE_6_REPORT.md) for what was verified, what was not, and the
-full limitation list.
-
-**Stop after Phase 6.** Phase 7 has not been started.
+See [`docs/PHASE_7_REPORT.md`](docs/PHASE_7_REPORT.md) for the exact test results, verification
+levels and the remaining-issue list.
 
 ## Third-party assets
 
