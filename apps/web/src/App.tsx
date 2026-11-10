@@ -178,6 +178,7 @@ export function App({ runtime }: { runtime: Runtime }) {
                     ![
                       '/',
                       '/settings',
+                      '/backup-sync',
                       '/inventory',
                       '/suppliers',
                       '/pos',

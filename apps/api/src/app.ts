@@ -103,7 +103,7 @@ export function createApp(
     });
   app.use(
     '/api',
-    limiter(300, 60_000),
+    limiter(config.apiRateLimit ?? 300, 60_000),
     originGuard(config),
     express.json({ limit: '64kb', strict: true }),
   );

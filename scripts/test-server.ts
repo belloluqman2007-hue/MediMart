@@ -26,6 +26,9 @@ const config: ApiConfig = {
   allowLanHttp: false,
   // The browser suite signs in once per scenario; keep the 10-per-15-minute production default out of its way.
   authRateLimit: 200,
+  // One suite makes hundreds of requests from one address; the 300/minute production default would
+  // otherwise refuse the final journeys. This file only ever serves the disposable test database.
+  apiRateLimit: 5_000,
 };
 const server = createApp(db, config, resolve('apps/web/dist')).listen(config.port, config.host);
 const stop = () =>

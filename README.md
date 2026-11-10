@@ -15,6 +15,10 @@
 
 Quick version: extract the Windows zip, open `MediMart.exe`, use the setup token it shows to create the owner, then add products and staff. Phones on the same Wi-Fi pair with the code from **Settings → Device pairing**. Nothing needs internet.
 
+## Architecture and technology
+
+The central computer runs a Node.js/Express API with a `better-sqlite3` authoritative database. The React/TypeScript/Vite web app calls that API; Android packages the same UI in a Capacitor shell and initializes a separate SQLCipher SQLite database with Keystore-backed secrets. Shared validation, permissions and migrations live in `packages/`. The Android shell holds an encrypted local copy of the catalogue and an outbox for offline capture; a central connection is still required to sign in, so there is no offline authentication. No paid service or cloud connection is required to run the central application on a local network.
+
 ## What works now
 
 - Responsive React dashboard, professional sign-in/owner-setup screens, module search, phone navigation, and 20 module destinations.
@@ -25,7 +29,7 @@ Quick version: extract the Windows zip, open `MediMart.exe`, use the setup token
 - Device registration, expiring pairing codes, authorized approval, proof-bound native sessions, and revocation.
 - Central SQLite database; shared, checksummed migrations for **52 tables** (thirteen migrations, schema v13); append-only application audit logs.
 - Android SQLite/SQLCipher initialization, installation UUIDs, Keystore-backed secret storage, configurable server address, and lifecycle/network hooks.
-- Atomic local-write/outbox primitives, receipt deduplication, conflict snapshots, and a working synchronization push with business handlers for sales, customers, debts, receipts, purchase orders and expenses.
+- Atomic local-write/outbox primitives, receipt deduplication, conflict snapshots, permission-gated aggregate queue diagnostics, and a working synchronization push with business handlers for sales, customers, debts, receipts, purchase orders and expenses.
 - Locally bundled Android assets and fonts. A production browser build can cache its **public shell only** on a secure origin; API responses are never cached.
 
 ### Sales and POS (Phase 3)
@@ -82,7 +86,7 @@ See the [Phase 2 report](docs/PHASE_2_REPORT.md), [Phase 1 report](docs/PHASE_1_
 
 ## Run this checkout
 
-Run commands from the repository root containing these Phase 1 changes:
+Run commands from the repository root:
 
 ```bash
 npm ci
@@ -264,7 +268,7 @@ var/                      Local development DB (ignored)
 
 - Do not edit released migrations or their frozen seed snapshot. Add a new migration; checksum drift blocks startup.
 - Never synchronize password hashes, sessions, device secrets, or bootstrap tokens through the business outbox.
-- Do not copy a live SQLite file alone as a backup while WAL writes are in progress. Use **Backup and Sync → Create backup now**, which writes a consistent snapshot and verifies it. See the [database guide](docs/DATABASE.md).
+- Do not copy a live SQLite file alone as a backup while WAL writes are in progress. Use **Backup and Sync → Create backup now**, which writes a consistent snapshot, re-opens and verifies it. See the [database guide](docs/DATABASE.md).
 - Do not clear Android app data or uninstall to fix a connection error. This removes installation identity and local records.
 - A cached shell is **not** offline authentication. Disconnected browsers do not receive protected privileges. Offline capture exists only in the Android application, only for a device with an approved pairing and a valid individual session.
 - Catalogue, supplier, category and unit changes remain online-only; the offline outbox accepts sales, customers, debt repayments, stock receipts, purchase orders and expenses. Credit sales, unverified discounts and prescriptions are refused offline by design. The stock ledger is authoritative; cached balances are compared by the reconciliation report, never silently overwritten.
@@ -272,7 +276,32 @@ var/                      Local development DB (ignored)
 - Never store money as floating point. Amounts are integer kobo from form input through the database.
 - No paid services, public hosting, or cloud synchronization are required or configured.
 
-**Stop after Phase 6.** See the [Phase 6 report](docs/PHASE_6_REPORT.md) for what was verified, what was not, and the remaining limitations. Phase 7 has not been started.
+## Phase 6 status and remaining limitations
+
+Offline capture and synchronization, verified backup/restore, the Windows desktop package and the
+Android build pipeline are implemented in this phase. `/backup-sync` is a real page: it shows
+synchronization counters, records from connected devices, creates and verifies backups, and prepares a
+restore behind a typed confirmation.
+
+This is **not** a claim of production readiness:
+
+- The Windows window has **not** been launched on Windows, and **no APK has been compiled** in the
+  build environment. Both must be built and exercised on real hardware before real trading.
+- Offline mode is Android-only and deliberately limited: credit sales, unverified discounts and
+  prescriptions are refused offline.
+- A restore is applied only at the next controlled start, and requires the application to be closed.
+- No code signing, no Windows Installer, no automatic update. The local API is HTTP on loopback, and
+  HTTP on a private LAN only in the documented debug APK profile.
+- The central database is not encrypted at rest; it relies on Windows account permissions. Backups are
+  unencrypted files and must be kept private.
+- A paired Android installation cannot change servers; a safe rebind is not implemented.
+- There is no local TLS provisioning, firewall configuration or public-internet exposure protection;
+  an administrator must configure them.
+
+See [`docs/PHASE_6_REPORT.md`](docs/PHASE_6_REPORT.md) for what was verified, what was not, and the
+full limitation list.
+
+**Stop after Phase 6.** Phase 7 has not been started.
 
 ## Third-party assets
 

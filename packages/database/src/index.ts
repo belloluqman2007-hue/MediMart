@@ -4,3 +4,4 @@ export * from './migrate';
 export * from './migrations';
 export * from './outbox';
 export * from './settings';
+export * from './sync-status';

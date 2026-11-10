@@ -239,6 +239,7 @@ for (const [name, path] of [
     ).toEqual([]);
   });
 }
+
 test('individual password changes sign out the owner and accept the new credential', async ({
   page,
 }) => {
@@ -254,6 +255,7 @@ test('individual password changes sign out the owner and accept the new credenti
   await signIn(page, { ...owner, password: newPassword });
   await expect(page.getByText('Your account is ready', { exact: true })).toBeVisible();
 });
+
 test('skip navigation and settings tabs work with a keyboard without changing the wrong route', async ({
   page,
 }) => {

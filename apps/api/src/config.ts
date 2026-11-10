@@ -38,6 +38,12 @@ export interface ApiConfig {
   secureCookies: boolean;
   /** Authentication attempts allowed per 15-minute window. Production uses the default of 10. */
   authRateLimit?: number;
+  /**
+   * General API requests allowed per minute, per client. Production uses the default of 300. Only
+   * the disposable end-to-end test server raises it, because one suite makes hundreds of requests
+   * from a single address; the production default is never relaxed by this.
+   */
+  apiRateLimit?: number;
   /** Absolute or relative folder where backup files are written. */
   backupDir: string;
   /** True only when started by the packaged desktop shell. */
