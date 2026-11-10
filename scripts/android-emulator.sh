@@ -18,8 +18,8 @@ PACKAGE=com.medimart.app
 
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
 export ANDROID_HOME="$SDK" ANDROID_SDK_ROOT="$SDK"
-SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
-AVDMANAGER="$SDK/cmdline-tools/latest/bin/avdmanager"
+SDKMANAGER="$(command -v sdkmanager || echo "$SDK/cmdline-tools/latest/bin/sdkmanager")"
+AVDMANAGER="$(command -v avdmanager || echo "$SDK/cmdline-tools/latest/bin/avdmanager")"
 EMULATOR="$SDK/emulator/emulator"
 ADB="$SDK/platform-tools/adb"
 IMAGE="system-images;android-${API_LEVEL};google_apis;x86_64"
@@ -75,15 +75,33 @@ step "Boot the emulator (headless)"
   -gpu swiftshader_indirect -accel on -memory 3072 > "$EVIDENCE/emulator.log" 2>&1 &
 EMULATOR_PID=$!
 "$ADB" start-server > /dev/null 2>&1 || true
-"$ADB" wait-for-device || fail "Emulator did not start" "adb could not see the emulator device."
+# `adb wait-for-device` blocks forever when the emulator dies, which would silently burn the whole
+# job timeout. Poll with a bound instead and say what is happening while waiting.
+DEVICE_SEEN=""
+for i in $(seq 1 60); do
+  if [ -n "$("$ADB" devices | awk 'NR>1 && $2=="device"')" ]; then
+    DEVICE_SEEN=1
+    break
+  fi
+  if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+    fail "The emulator exited" "qemu exited before the device came online (exit code captured in emulator.log)."
+  fi
+  [ $((i % 6)) -eq 0 ] && echo "  waiting for the emulator to come online (${i}0s): $("$ADB" devices | tail -n +2 | tr '\n' ' ')"
+  sleep 10
+done
+[ -n "$DEVICE_SEEN" ] || fail "Emulator did not start" "adb never saw a device within 10 minutes; see emulator.log."
 # Boot completed, not merely "device online": installing too early fails intermittently.
 BOOTED=""
-for _ in $(seq 1 120); do
+for i in $(seq 1 120); do
   if [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
     BOOTED=1
     break
   fi
-  sleep 5
+  if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+    fail "The emulator exited while booting" "qemu exited before Android finished booting; see emulator.log."
+  fi
+  [ $((i % 12)) -eq 0 ] && echo "  booting Android ${API_LEVEL} (${i}0s elapsed, boot_completed=$( "$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'))"
+  sleep 10
 done
 [ -n "$BOOTED" ] || fail "Emulator did not finish booting" "sys.boot_completed never became 1 within 10 minutes."
 "$ADB" shell getprop ro.build.version.release | tee "$EVIDENCE/android-version.txt"

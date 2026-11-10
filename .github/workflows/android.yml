@@ -6,6 +6,10 @@
 # the checked-in Capacitor project, verifies the package identity and permissions from the APK
 # itself, then installs and starts that exact APK on an emulator.
 name: Android build, install and run
+concurrency:
+  # A superseded run must never keep holding this pull request open with its emulator jobs.
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 on:
   workflow_dispatch:
   push:
