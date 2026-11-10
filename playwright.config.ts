@@ -7,7 +7,11 @@ export default defineConfig({
   retries: 0,
   timeout: 30_000,
   expect: { timeout: 10_000 },
-  reporter: [['list'], ['html', { open: 'never' }]],
+  // In CI, the github reporter attaches each failing test as an annotation, so a failure names
+  // itself even when the log download is unavailable.
+  reporter: process.env.GITHUB_ACTIONS
+    ? [['github'], ['list'], ['html', { open: 'never' }]]
+    : [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'http://localhost:4173',
     viewport: { width: 1440, height: 1000 },

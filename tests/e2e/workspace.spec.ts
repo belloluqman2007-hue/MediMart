@@ -89,7 +89,7 @@ test('settings persist and an owner can create a limited staff account', async (
   await page.goto('/#/settings');
   await page.getByLabel('Business name', { exact: true }).fill('MediMart browser test');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Business name saved');
+  await expect(page.locator('.toast[role="status"]')).toContainText('Business name saved');
   await page.reload();
   await expect(page.getByLabel('Business name', { exact: true })).toHaveValue(
     'MediMart browser test',
@@ -100,7 +100,9 @@ test('settings persist and an owner can create a limited staff account', async (
   await page.getByLabel('Role', { exact: true }).selectOption('cashier');
   await page.getByLabel('Initial password', { exact: true }).fill(staff.password);
   await page.getByRole('button', { name: 'Create staff account' }).click();
-  await expect(page.getByRole('status')).toContainText('Individual staff account created');
+  await expect(page.locator('.toast[role="status"]')).toContainText(
+    'Individual staff account created',
+  );
 });
 test('an owner can add a product, receive a batch, and audit it in the stock ledger', async ({
   page,
@@ -201,8 +203,18 @@ test('public shell reopens offline without caching API responses or granting a s
 }) => {
   await page.goto('/');
   await page.evaluate(() => navigator.serviceWorker.ready);
+  // Service-worker timing differs between machines: the first registration does not control the
+  // page that registered it until it is claimed. Reload until it is in control rather than
+  // assuming a single activation tick.
   await expect
-    .poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
+    .poll(
+      async () => {
+        if (await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) return true;
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        return page.evaluate(() => Boolean(navigator.serviceWorker.controller));
+      },
+      { timeout: 30_000, intervals: [500, 1_000, 2_000] },
+    )
     .toBe(true);
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -333,7 +345,9 @@ test('owner records a part-paid credit sale, settles customer debt, refunds an i
   await custModal.getByLabel('Customer phone', { exact: true }).fill('08023456789');
   await custModal.getByLabel('Credit limit (₦)', { exact: true }).fill('5000.00');
   await custModal.getByRole('button', { name: 'Save & select customer', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Customer Bolanle Adeyemi registered');
+  await expect(page.locator('.toast[role="status"]')).toContainText(
+    'Customer Bolanle Adeyemi registered',
+  );
 
   await page.getByLabel('Scan barcode or SKU', { exact: true }).fill('BR-E2E-0001');
   await page.getByRole('button', { name: 'Scan / Add', exact: true }).click();
@@ -361,7 +375,7 @@ test('owner records a part-paid credit sale, settles customer debt, refunds an i
     .getByRole('dialog')
     .getByRole('button', { name: 'Save repayment', exact: true })
     .click();
-  await expect(page.getByRole('status')).toContainText('repayment against');
+  await expect(page.locator('.toast[role="status"]')).toContainText('repayment against');
 
   // Refund 1 tablet from Sales History -> Sale Detail
   await page.goto('/#/pos/sales');
@@ -425,7 +439,12 @@ test('owner opens the Phase 5 purchasing and finance workspaces without runtime 
 });
 
 test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async ({ page }) => {
-  test.setTimeout(90_000);
+  // A long clinical journey: registering, vitals, consultation, prescription and dispensing.
+  // 90s was not enough on a loaded CI runner, which surfaced as a timeout at a late step.
+  test.setTimeout(180_000);
+  // Unique per attempt: a retry must not collide with rows an earlier attempt created in the same
+  // database (a duplicate staff e-mail answers 409 and the retry then fails for the wrong reason).
+  const attempt = crypto.randomUUID().slice(0, 8);
   const bootstrap = await (await page.request.get('/api/auth/bootstrap-status')).json();
   if (bootstrap.required) {
     const registration = await page.request.post('/api/auth/register-owner', {
@@ -448,7 +467,7 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
     page.request.post(url, { headers: { 'X-CSRF-Token': session.csrfToken }, data });
   const clinical = {
     fullName: 'Synthetic Clinical Professional',
-    email: 'clinical@synthetic.test',
+    email: `clinical-${attempt}@synthetic.test`,
     password: 'Synthetic clinical passphrase 2026!',
   };
   const created = await post('/api/staff', {
@@ -463,7 +482,7 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   expect(unit).toBeTruthy();
   const product = await post('/api/products', {
     name: 'Synthetic Clinical Medicine',
-    sku: 'SYNTH-E2E-MED',
+    sku: `SYNTH-E2E-MED-${attempt}`,
     productType: 'medicine',
     purchaseCostKobo: 100,
     sellingPriceKobo: 200,
@@ -493,17 +512,32 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   await page.reload();
   await signIn(page, clinical);
   await page.goto('/#/patients/new');
-  await page.getByLabel('Full name', { exact: true }).fill('Synthetic Patient Browser');
+  // Unique per attempt: a name already on file raises the duplicate-patient warning, which
+  // correctly refuses to save until a reason is given — that would make a retry fail for a reason
+  // that has nothing to do with the workflow under test.
+  const patientName = `Synthetic Patient ${attempt}`;
+  await page.getByLabel('Full name', { exact: true }).fill(patientName);
   await page.getByLabel('Date of birth', { exact: true }).fill('1990-01-01');
-  await page.getByLabel('Phone number', { exact: true }).fill('0005550123');
+  // The duplicate check applies to the phone number as well as the name.
+  await page.getByLabel('Phone number', { exact: true }).fill(`000555${attempt.slice(0, 4)}`);
   await page
     .getByLabel('Known allergies (record unknown or none known explicitly)')
     .fill('Synthetic allergy — review required');
   await page.screenshot({ path: 'docs/screenshots/phase4-registration.png', fullPage: true });
   await page.getByRole('button', { name: 'Save patient', exact: true }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Synthetic Patient Browser', exact: true }),
-  ).toBeVisible();
+  // Wait for the profile route rather than only the heading, and report the form's own message when
+  // the server refuses the record (for example a duplicate warning) instead of timing out blind.
+  try {
+    await expect(page).toHaveURL(/#\/patients\/[^/]+$/, { timeout: 20_000 });
+  } catch {
+    const refusal = await page
+      .locator('.alert, [role="alert"]')
+      .first()
+      .innerText()
+      .catch(() => '');
+    throw new Error(`Saving the patient did not reach the profile page. Screen said: ${refusal}`);
+  }
+  await expect(page.getByRole('heading', { name: patientName, exact: true })).toBeVisible();
   const patientId = page.url().split('/patients/')[1]!;
   await page.getByText('Record vital signs', { exact: true }).click();
   await page.getByLabel('Weight (kg)', { exact: true }).fill('80');
@@ -523,6 +557,20 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   await page.getByLabel('Treatment plan', { exact: true }).fill('Synthetic plan for test only');
   await page.screenshot({ path: 'docs/screenshots/phase4-consultation.png', fullPage: true });
   await page.getByRole('button', { name: 'Save consultation', exact: true }).click();
+  // Assert the navigation the save performs, then the recorded consultation. Asserting the typed
+  // text alone can match the form itself, which hides a save that never completed.
+  try {
+    await expect(page).toHaveURL(/#\/patients\/[^/]+$/, { timeout: 20_000 });
+  } catch {
+    const refusal = await page
+      .locator('.alert, [role="alert"]')
+      .first()
+      .innerText()
+      .catch(() => '');
+    throw new Error(
+      `Saving the consultation did not reach the profile page. Screen said: ${refusal}`,
+    );
+  }
   await expect(
     page.getByText('Synthetic complaint for workflow testing', { exact: true }),
   ).toBeVisible();
@@ -605,13 +653,13 @@ test('owner synchronizes, creates a verified backup, and restores it with explic
 
   // A backup is a real file: create it, then confirm it appears in the history with a checksum.
   await page.getByRole('button', { name: 'Create backup now', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText(/backup/i, { timeout: 20_000 });
+  await expect(page.locator('.toast[role="status"]')).toContainText(/backup/i, { timeout: 20_000 });
   const history = page.locator('.backup-sync-grid ~ .card').filter({ hasText: 'Backup history' });
   await expect(history).toContainText('.sqlite');
   const verify = page.getByRole('button', { name: /^Verify$/ }).first();
   await expect(verify).toBeVisible();
   await verify.click();
-  await expect(page.getByRole('status')).toContainText(/intact|verified/i);
+  await expect(page.locator('.toast[role="status"]')).toContainText(/intact|verified/i);
 
   // Restore is gated behind typing the word, and says what will happen before it happens.
   await page

@@ -6,9 +6,9 @@
  * computer that may not have internet access.
  *
  * What goes in:
- *   resources/app      the Electron shell (main.mjs) and application icon
- *   resources/server   the built API bundle, runtime modules and the built web application
- *   electron.exe       renamed to MediMart.exe
+ *   MediMart.exe            the Electron runtime, renamed
+ *   resources/app           the Electron shell (main.mjs) + assets
+ *   resources/server        the built API bundle, runtime modules and the built web application
  *
  * What does not go in: development tooling, test fixtures, source maps, `.env` files, or any
  * credential. The owner setup token is generated on the user's own machine at first start.
@@ -17,15 +17,15 @@
  * -------------------------------
  * Both native modules (better-sqlite3, argon2) are ABI-stable N-API addons and ship per-platform
  * prebuilds inside their npm packages, so the staged tree is checked for a win32-x64 addon before
- * anything is zipped. Packaging can run on any host, but only a Windows machine can start the
- * result: the deliverable is the artifact built and smoke-tested by `.github/workflows/desktop.yml`
- * on `windows-latest`. Output produced elsewhere is labelled `verified: false` in the manifest and
- * must not be shipped without a Windows run.
+ * anything is zipped. Packaging can run on any host, but only Windows can start the result: the
+ * deliverable is the artifact built and smoke-tested by `.github/workflows/desktop.yml` on
+ * `windows-latest`. Output produced elsewhere is labelled `verified: false` in the manifest.
  *
- * The Electron runtime is downloaded from the official Electron GitHub release over the pinned
- * version, with an optional `MEDIMART_ELECTRON_DIR` override for offline machines.
+ * Every check in this file fails loudly with an explanation. Nothing is "warned and skipped":
+ * an incomplete package would look installed and then fail on the shop's computer.
  */
 import { execFileSync } from 'node:child_process';
+import { runNpm } from './npm-run.mjs';
 import {
   cpSync,
   createWriteStream,
@@ -48,9 +48,10 @@ const ELECTRON_VERSION = '38.4.0';
 const outRoot = join(root, 'dist', 'desktop');
 const stageDir = join(outRoot, 'electron-runtime');
 const appDir = join(outRoot, 'MediMart-win32-x64');
-const zipPath = join(outRoot, `MediMart-${pkg.version}-win-x64.zip`);
+const zipName = 'MediMart-Windows-x64.zip';
+const zipPath = join(outRoot, zipName);
+const versionedZipPath = join(outRoot, `MediMart-${pkg.version}-win-x64.zip`);
 const isWindows = process.platform === 'win32';
-const npm = isWindows ? 'npm.cmd' : 'npm';
 
 if (!isWindows) {
   console.warn(
@@ -92,7 +93,7 @@ async function ensureElectronRuntime() {
   const override = process.env.MEDIMART_ELECTRON_DIR;
   if (override && existsSync(override)) return override;
   const local = join(root, 'node_modules', 'electron', 'dist');
-  if (existsSync(join(local, 'electron.exe')) || existsSync(join(local, 'electron'))) return local;
+  if (existsSync(join(local, 'electron.exe'))) return local;
   mkdirSync(outRoot, { recursive: true });
   if (!existsSync(join(stageDir, 'electron.exe'))) {
     const zip = join(outRoot, `electron-v${ELECTRON_VERSION}-win32-x64.zip`);
@@ -107,6 +108,8 @@ async function ensureElectronRuntime() {
     rmSync(stageDir, { recursive: true, force: true });
     extractZip(zip, stageDir);
   }
+  if (!existsSync(join(stageDir, 'electron.exe')))
+    throw new Error(`The Electron runtime at ${stageDir} has no electron.exe.`);
   return stageDir;
 }
 
@@ -149,11 +152,10 @@ function copyModules(target) {
     'express-rate-limit',
     'helmet',
     'zod',
-    'bindings',
-    'file-uri-to-path',
-    'prebuild-install',
+    '@phc/format',
     'node-addon-api',
     'node-gyp-build',
+    'cross-env',
   ];
   mkdirSync(target, { recursive: true });
   const seen = new Set();
@@ -163,7 +165,13 @@ function copyModules(target) {
     if (!name || seen.has(name)) continue;
     seen.add(name);
     const source = join(root, 'node_modules', name);
-    if (!existsSync(source)) continue;
+    if (!existsSync(source)) {
+      // Optional transitive dependencies (for example cross-env's Windows-only helper) are fine
+      // to omit only when npm itself did not install them; a *root* module missing is fatal.
+      if (roots.includes(name))
+        throw new Error(`Runtime module "${name}" is missing from node_modules. Run npm ci first.`);
+      continue;
+    }
     copyDir(source, join(target, name));
     const manifest = join(source, 'package.json');
     if (!existsSync(manifest)) continue;
@@ -175,28 +183,44 @@ function copyModules(target) {
   verifyNativeModules(target);
 }
 
+/** Fail the build if a file that would leak secrets or waste space slipped into the package. */
+function verifyNoSecrets(target) {
+  const forbidden = [/(^|[\\/])\.env($|\.)/i, /\.(jks|keystore|p12|pfx|pem|key)$/i, /id_rsa/i];
+  const offenders = [];
+  const walk = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (forbidden.some((pattern) => pattern.test(full))) offenders.push(full);
+    }
+  };
+  walk(target);
+  if (offenders.length)
+    throw new Error(`Refusing to package credential-shaped files: ${offenders.join(', ')}`);
+  console.log('    no .env, keystore or private-key file is packaged');
+}
+
 async function main() {
   const runtime = await ensureElectronRuntime();
 
-  console.log('1/5 Building the web application and the API bundle…');
-  execFileSync(npm, ['run', 'build'], {
-    cwd: root,
-    stdio: 'inherit',
-  });
+  console.log('1/6 Building the web application and the API bundle…');
+  runNpm(['run', 'build'], { cwd: root });
 
-  console.log('2/5 Staging the Electron runtime…');
+  console.log('2/6 Staging the Electron runtime…');
   rmSync(appDir, { recursive: true, force: true });
   mkdirSync(appDir, { recursive: true });
   copyDir(runtime, appDir);
-  // The runtime shipped for development may include a default app; the shell replaces it.
+  // The runtime shipped for development may include a default app; the shell replaces it. Removing
+  // it also keeps the runtime from falling back to the Electron welcome window if the app folder
+  // were ever damaged, so a broken install is obvious rather than confusing.
   rmSync(join(appDir, 'resources', 'default_app.asar'), { force: true });
 
-  console.log('3/5 Copying the shell, server bundle and web build…');
+  console.log('3/6 Copying the shell, server bundle and web build…');
   const resources = join(appDir, 'resources');
   mkdirSync(join(resources, 'app'), { recursive: true });
   mkdirSync(join(resources, 'server'), { recursive: true });
   copyDir(join(root, 'apps', 'desktop', 'main.mjs'), join(resources, 'app', 'main.mjs'));
-  copyDir(join(root, 'apps', 'desktop', 'package.json'), join(resources, 'app', 'package.json'));
+  copyDir(join(root, 'apps', 'desktop', 'launch.mjs'), join(resources, 'app', 'launch.mjs'));
   const iconDir = join(root, 'apps', 'desktop', 'assets');
   if (!existsSync(join(iconDir, 'icon.png'))) {
     throw new Error('Missing apps/desktop/assets/icon.png. Run: node scripts/generate-icons.mjs');
@@ -204,15 +228,12 @@ async function main() {
   copyDir(iconDir, join(resources, 'app', 'assets'));
   // Windows picks the taskbar icon from the executable; the runtime ships a generic one. The
   // .exe is not rewritten (that would need a resource editor and code signing), so the window and
-  // taskbar icon come from the BrowserWindow icon above, and Setup/desktop shortcuts use the PNGs.
-  for (const size of [256, 128, 64]) {
-    const candidate = join(iconDir, `icon-${size}.png`);
-    if (existsSync(candidate))
-      copyDir(candidate, join(resources, 'app', 'assets', `icon-${size}.png`));
-  }
+  // taskbar icon come from the BrowserWindow icon above, and desktop shortcuts use the PNGs.
   copyDir(join(root, 'apps', 'api', 'dist'), join(resources, 'server'));
   mkdirSync(join(resources, 'server', 'apps', 'web'), { recursive: true });
   copyDir(join(root, 'apps', 'web', 'dist'), join(resources, 'server', 'apps', 'web', 'dist'));
+  // The shell resolves the server bundle and the built web application relative to itself, so the
+  // packaged paths are explicit rather than depending on a working directory.
   writeFileSync(
     join(resources, 'app', 'package.json'),
     JSON.stringify(
@@ -220,46 +241,53 @@ async function main() {
         name: 'medimart-desktop',
         productName: 'MediMart',
         version: pkg.version,
-        main: 'main.mjs',
+        description: 'MediMart — local-first pharmacy and mini-mart workspace',
+        main: 'launch.mjs',
         type: 'module',
+        author: 'MediMart',
       },
       null,
       2,
     ),
   );
   copyModules(join(resources, 'server', 'node_modules'));
+  verifyNoSecrets(resources);
 
-  console.log('4/5 Naming the launcher…');
+  console.log('4/6 Naming the launcher…');
   const electronExe = join(appDir, 'electron.exe');
   const launcher = join(appDir, 'MediMart.exe');
+  if (existsSync(launcher)) rmSync(launcher, { force: true });
   if (existsSync(electronExe)) renameSync(electronExe, launcher);
   if (!existsSync(launcher))
     throw new Error('Electron binary missing from the staged runtime. Distribution refused.');
+  // Keep the alternate launcher name out of the package: two executables in one folder confuse a
+  // non-technical user, and only MediMart.exe is tested.
+  rmSync(join(appDir, 'electron.exe'), { force: true });
 
-  console.log('5/5 Writing the manifest and the distributable zip…');
-  writeFileSync(
-    join(outRoot, 'build-manifest.json'),
-    JSON.stringify(
-      {
-        name: 'MediMart',
-        version: pkg.version,
-        platform: 'win32-x64',
-        electron: ELECTRON_VERSION,
-        builtAt: new Date().toISOString(),
-        builtOn: isWindows ? 'win32' : process.platform,
-        verified: isWindows,
-        nativeAddons: 'better-sqlite3 + argon2 (win32-x64 N-API prebuilds, staged and checked)',
-        entry: 'MediMart.exe',
-        server: 'resources/server/index.js',
-        web: 'resources/server/apps/web/dist',
-        dataDirectory: '%APPDATA%\\MediMart\\data',
-        backupDirectory: '%APPDATA%\\MediMart\\backups',
-      },
-      null,
-      2,
-    ),
-  );
+  console.log('5/6 Writing the manifest…');
+  const manifest = {
+    name: 'MediMart',
+    version: pkg.version,
+    platform: 'win32-x64',
+    electron: ELECTRON_VERSION,
+    builtAt: new Date().toISOString(),
+    builtOn: isWindows ? 'win32' : process.platform,
+    verified: isWindows,
+    nativeAddons: 'better-sqlite3 + argon2 (win32-x64 N-API prebuilds, staged and checked)',
+    entry: 'MediMart.exe',
+    server: 'resources/server/index.js',
+    web: 'resources/server/apps/web/dist',
+    dataDirectory: '%APPDATA%\\MediMart\\data',
+    backupDirectory: '%APPDATA%\\MediMart\\backups',
+  };
+  writeFileSync(join(outRoot, 'build-manifest.json'), JSON.stringify(manifest, null, 2));
+  writeFileSync(join(appDir, 'README.txt'), readme());
+
+  console.log('6/6 Writing the distributable zip…');
   makeZip(zipPath, 'MediMart-win32-x64', outRoot);
+  // A stable, unambiguous artifact name for the shop owner plus a versioned copy for archives.
+  rmSync(versionedZipPath, { force: true });
+  cpSync(zipPath, versionedZipPath);
   console.log('Desktop package:', appDir);
   console.log(
     'Distributable:  ',
@@ -272,6 +300,32 @@ async function main() {
         process.platform +
         ' — verified: false. Ship the artifact built and smoke-tested by .github/workflows/desktop.yml.',
     );
+}
+
+function readme() {
+  return [
+    'MediMart for Windows',
+    '====================',
+    '',
+    `Version ${pkg.version}`,
+    '',
+    '1. Keep this whole folder together. Do not run MediMart from inside a zip file.',
+    '2. Double-click MediMart.exe.',
+    '3. If Windows shows "Windows protected your PC", choose More info, then Run anyway.',
+    '4. Create the owner account with the setup token shown in the MediMart menu',
+    '   (MediMart -> Owner setup token).',
+    '',
+    'Your business data is kept outside this folder:',
+    '  database  %APPDATA%\\MediMart\\data\\medimart.sqlite',
+    '  backups   %APPDATA%\\MediMart\\backups',
+    '  settings  %APPDATA%\\MediMart\\medimart.env',
+    '  logs      %APPDATA%\\MediMart\\logs',
+    '',
+    'You can move or replace this folder without losing data.',
+    'A phone on the same Wi-Fi connects with the address shown in Help -> Shop network address.',
+    'No internet connection is required.',
+    '',
+  ].join('\r\n');
 }
 
 await main();

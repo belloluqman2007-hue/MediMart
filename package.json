@@ -34,6 +34,8 @@
     "android:apk": "node scripts/build-apk.mjs --profile debug",
     "android:apk:release": "node scripts/build-apk.mjs --profile release",
     "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop:verify": "node scripts/verify-desktop-package.mjs",
+    "test:pairing": "node --import=tsx scripts/test-android-pairing.ts",
     "icons:generate": "node scripts/generate-icons.mjs",
     "test:production": "node --import=tsx scripts/test-production.ts"
   },

@@ -15,7 +15,14 @@
  */
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
@@ -25,13 +32,19 @@ const userData = app.getPath('userData');
 const documents = join(app.getPath('documents'), 'MediMart Backups');
 const databasePath = join(userData, 'data', 'medimart.sqlite');
 const backupDir = join(userData, 'backups');
+const logFile = join(userData, 'logs', 'medimart.log');
 const envFile = join(userData, 'medimart.env');
 const restoreRequest = `${databasePath}.restore-request`;
 const portablePath = join(userData, 'restore.pending');
 
-/** Only 127.0.0.1: the desktop window talks to this machine, not to a network share. */
+/**
+ * Loopback for the window. The server *listens* on 0.0.0.0 so a phone on the same Wi-Fi can reach
+ * it; the window itself only ever talks to 127.0.0.1.
+ */
 const PORT = Number(process.env.MEDIMART_DESKTOP_PORT ?? 4780);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+/** Capacitor `androidScheme: 'https'` makes the phone's WebView origin "https://localhost". */
+const ANDROID_ORIGIN = 'https://localhost';
 
 let mainWindow = null;
 let apiProcess = null;
@@ -39,7 +52,13 @@ let quitting = false;
 
 function log(message) {
   // Deliberately no credentials, request bodies or patient data in the log.
+  const line = `${new Date().toISOString()} ${message}`;
   console.log(`[medimart-desktop] ${message}`);
+  try {
+    appendFileSync(logFile, `${line}\n`, { mode: 0o600 });
+  } catch {
+    // A read-only or full disk must not stop the application from starting.
+  }
 }
 
 function ensureDirectories() {
@@ -98,14 +117,17 @@ function readEnvValue(key) {
   }
 }
 
-function serverEntry() {
-  // Packaged layout: <resources>/app.asar.unpacked? No — the server bundle and its native
-  // dependencies are unpacked next to the app so better-sqlite3 can load its .node binary.
+/**
+ * The API bundle and its native dependencies live unpacked in <resources>/server so
+ * better-sqlite3 can load its .node binary (a .node file inside an asar is not loadable from a
+ * child process). The development layout is the fallback when the shell runs from the repository.
+ */
+function serverRoot() {
   const candidates = [
-    join(process.resourcesPath, 'server', 'index.js'),
-    join(app.getAppPath(), '..', '..', 'apps', 'api', 'dist', 'index.js'),
+    join(process.resourcesPath, 'server'),
+    join(app.getAppPath(), '..', '..', 'apps', 'api', 'dist'),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+  return candidates.find((candidate) => existsSync(join(candidate, 'index.js'))) ?? null;
 }
 
 function localAddresses() {
@@ -138,12 +160,18 @@ function applyPendingRestore() {
 }
 
 function startServer() {
-  const entry = serverEntry();
-  if (!entry) return Promise.reject(new Error('The MediMart server bundle is missing.'));
+  const root = serverRoot();
+  if (!root) return Promise.reject(new Error('The MediMart server bundle is missing.'));
+  const entry = join(root, 'index.js');
+  // The compiled API serves the interface from <cwd>/apps/web/dist.
+  const workingDirectory = existsSync(join(root, 'apps', 'web', 'dist', 'index.html'))
+    ? root
+    : join(app.getAppPath(), '..', '..');
+  log(`starting the local server from ${entry}`);
   const { databasePath: dbPath, backupDir: backups } = resolvePorts();
   return new Promise((resolve, reject) => {
     apiProcess = spawn(process.execPath, [entry], {
-      cwd: join(process.resourcesPath, 'server'),
+      cwd: workingDirectory,
       // ELECTRON_RUN_AS_NODE makes the bundled Electron binary behave as a plain Node runtime,
       // so the shop does not need a separate Node.js installation.
       env: {
@@ -158,8 +186,11 @@ function startServer() {
         COOKIE_SECURE: 'false',
         MEDIMART_MANAGED_DESKTOP: 'true',
         MEDIMART_ALLOW_LAN_HTTP: 'true',
-        ALLOWED_ORIGINS: ORIGIN,
-        DESKTOP_ALLOWED_ORIGINS: ORIGIN,
+        // The window (loopback) and the Android WebView origin. A native MediMart client sends
+        // no browser cookie, so this only prevents a stray cross-origin page from using the API;
+        // it is not the authentication boundary (the bearer session token is).
+        ALLOWED_ORIGINS: `${ORIGIN},${ANDROID_ORIGIN}`,
+        DESKTOP_ALLOWED_ORIGINS: `${ORIGIN},${ANDROID_ORIGIN}`,
         SESSION_HOURS: '12',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -168,8 +199,12 @@ function startServer() {
       detached: false,
     });
     let settled = false;
+    // Keep the child's own words for the failure dialog: "the server did not start" with no reason
+    // is the least useful error a shop owner can be shown.
+    let serverOutput = '';
     const onData = (chunk) => {
       const text = String(chunk);
+      serverOutput = `${serverOutput}${text}`.slice(-2000);
       if (/listening on/i.test(text)) {
         settled = true;
         log(`Local server ready on ${ORIGIN}`);
@@ -178,12 +213,20 @@ function startServer() {
     };
     apiProcess.stdout?.on('data', onData);
     apiProcess.stderr?.on('data', (chunk) => {
+      onData(chunk);
       const text = String(chunk).trim();
       if (text) log(`server stderr: ${text.slice(0, 300)}`);
     });
+    apiProcess.on('error', (error) => {
+      if (!settled) reject(new Error(`The local server could not run: ${error.message}`));
+    });
     apiProcess.on('exit', (code) => {
       apiProcess = null;
-      if (!settled) reject(new Error(`The local server stopped with code ${code ?? 'unknown'}.`));
+      const detail = serverOutput.trim().split('\n').slice(-6).join(' ');
+      if (!settled)
+        reject(
+          new Error(`The local server stopped with code ${code ?? 'unknown'}. ${detail}`.trim()),
+        );
       else if (!quitting) {
         void dialog.showMessageBox({
           type: 'error',
@@ -347,6 +390,19 @@ function createWindow() {
     },
   });
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  // A window that never becomes visible is indistinguishable from a broken application, so a
+  // failed first load always shows the reason and still reveals the window.
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    if (!isMainFrame) return;
+    log(`window load failed (${code} ${description}) for ${url}`);
+    mainWindow?.show();
+    void dialog.showMessageBox({
+      type: 'error',
+      title: 'MediMart could not open',
+      message: 'The MediMart window could not load its local application.',
+      detail: `${description} (${code}).\n\nClose MediMart and start it again. Details are in ${logFile}.`,
+    });
+  });
   const allowedOrigin = new URL(ORIGIN).origin;
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (new URL(url).origin !== allowedOrigin) {
@@ -374,6 +430,70 @@ function createWindow() {
   void mainWindow.loadURL(`${ORIGIN}/#/`);
 }
 
+/**
+ * When `MEDIMART_DESKTOP_DIAGNOSTICS` names a file, start the server, prove the packaged runtime
+ * end to end (server startup, health, the bundled interface) and exit with a status code instead
+ * of opening a window. The Windows CI job uses this to test the *packaged* application rather than
+ * a second copy of the source, so a broken package can never be uploaded as a working one.
+ */
+async function runDiagnostics(target) {
+  const { writeFileSync: write } = await import('node:fs');
+  const report = {
+    ok: false,
+    electron: process.versions.electron,
+    node: process.versions.node,
+    platform: `${process.platform}-${process.arch}`,
+    packaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    serverRoot: serverRoot(),
+    dataDirectory: join(userData, 'data'),
+    backupDirectory: backupDir,
+    checks: [],
+  };
+  const check = (name, ok, detail) => {
+    report.checks.push({ name, ok, detail });
+    log(`diagnostics: ${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
+    return ok;
+  };
+  try {
+    ensureDirectories();
+    bootstrapToken();
+    check('data directory is writable', existsSync(join(userData, 'data')));
+    await startServer();
+    check('local server started', true, ORIGIN);
+    const health = await fetch(`${ORIGIN}/api/health`, { signal: AbortSignal.timeout(10_000) });
+    const payload = await health.json();
+    check('health endpoint', health.ok && payload.status === 'ok', JSON.stringify(payload));
+    const shell = await fetch(`${ORIGIN}/`, { signal: AbortSignal.timeout(10_000) });
+    const html = await shell.text();
+    check(
+      'bundled interface served',
+      shell.ok && /MediMart/.test(html) && /assets\//.test(html),
+      `${html.length} bytes`,
+    );
+    const assetPath = /assets\/([A-Za-z0-9._-]+\.js)/.exec(html)?.[1];
+    if (assetPath) {
+      const asset = await fetch(`${ORIGIN}/assets/${assetPath}`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      check('bundled script loads', asset.ok && (await asset.text()).length > 1000, assetPath);
+    }
+    // The native modules the packaged server depends on must load inside the Electron runtime.
+    const sqlite = await fetch(`${ORIGIN}/api/health`).then((response) => response.ok);
+    check('native SQLite available to the packaged server', sqlite);
+    report.ok = report.checks.every((entry) => entry.ok);
+  } catch (error) {
+    report.error = error instanceof Error ? error.message : String(error);
+    log(`diagnostics failed: ${report.error}`);
+  } finally {
+    report.databasePath = resolvePorts().databasePath;
+    write(target, JSON.stringify(report, null, 2));
+    await stopServer().catch(() => undefined);
+    app.exit(report.ok ? 0 : 1);
+  }
+}
+
 async function main() {
   ensureDirectories();
   bootstrapToken();
@@ -390,6 +510,11 @@ async function main() {
     }
   });
   buildMenu();
+  const diagnostics = process.env.MEDIMART_DESKTOP_DIAGNOSTICS;
+  if (diagnostics) {
+    await runDiagnostics(diagnostics);
+    return;
+  }
   try {
     await startServer();
   } catch (error) {
@@ -409,7 +534,10 @@ async function main() {
   app.on('window-all-closed', () => app.quit());
 }
 
+// A packaged application keeps everything under %APPDATA%\MediMart (Electron derives this from the
+// product name); an unpackaged run uses the same folder so a developer sees the shop's real paths.
 app.setName('MediMart');
+app.setAppUserModelId('com.medimart.desktop');
 void main();
 
 process.on('uncaughtException', (error) => {

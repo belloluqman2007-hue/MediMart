@@ -3,11 +3,13 @@
 The Windows application is the **central computer** of the shop. It holds the one business database,
 serves the phones on the same Wi-Fi, and works with no internet connection.
 
-> **What has actually been checked in the build environment, and what has not.** The desktop package
-> has been assembled and its server verified (the packaged API starts, migrates a fresh database,
-> answers `/api/health`, and serves the built interface). It has **not** been launched as a Windows
-> window on a real Windows machine: this build environment is Linux and cannot download the Electron
-> Windows runtime. See [Verification status](#verification-status) for the exact list.
+> **What is actually checked, and where.** The package is built and tested on a real
+> `windows-latest` GitHub runner by `.github/workflows/desktop.yml`, which uploads the artifact
+> **`MediMart-Windows-x64`**. That job runs the whole quality suite on Windows, builds the package,
+> then starts the packaged `MediMart.exe` itself: the shell launches its own server against a fresh
+> database, answers `/api/health` and serves the bundled interface, and the job fails if it does not.
+> A window screenshot and the application log are uploaded as evidence. See
+> [Verification status](#verification-status) for the precise list.
 
 ---
 
@@ -24,7 +26,8 @@ serves the phones on the same Wi-Fi, and works with no internet connection.
 
 ## 2. Install (about two minutes)
 
-1. Copy `MediMart-<version>-win-x64.zip` to the shop computer.
+1. Download **`MediMart-Windows-x64.zip`** from the latest successful _Windows desktop application_
+   run (Actions → the run → Artifacts) and copy it to the shop computer.
 2. Right-click the zip → **Extract All**. Choose a simple location such as
    `C:\MediMart`. Do **not** run it from inside the zip, and do not put it on a USB stick you plan
    to remove.
@@ -163,14 +166,14 @@ machine at first start.
 
 ## Verification status
 
-| Item                                                                                                   | Status                                                                                                                                                                                               |
-| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Packaged server starts, migrates, answers health and serves the built interface                        | **Verified in this environment** (`node index.js` from `resources/server`, empty database)                                                                                                           |
-| Packager assembles `MediMart-win32-x64` with the server, web build, native modules, icons and manifest | **Verified** (`dist/desktop/build-manifest.json`)                                                                                                                                                    |
-| Desktop shell syntax and configuration (`main.mjs`)                                                    | **Verified** by `node --check` and review; single window, navigation blocked                                                                                                                         |
-| Electron Windows runtime download and window launch on Windows                                         | **Not verified here.** This machine is Linux and the download is blocked, so `MediMart.exe` was assembled from a stub runtime. Launching the real window must be confirmed on a Windows 10 computer. |
-| Startup/shutdown without database corruption on a real Windows machine                                 | **Not verified here** (same reason)                                                                                                                                                                  |
-| Backup creation, verification and restore preparation                                                  | **Verified** by automated tests against real files on disk                                                                                                                                           |
+| Item                                                                                                      | Status                                                                                                     |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Full quality suite (format, types, lint, unit/API tests, build, Playwright) on Windows                    | **Run by** `.github/workflows/desktop.yml` on `windows-latest`                                             |
+| Packager assembles `MediMart-win32-x64` with the server, web build, native modules, icons and manifest    | **Verified** by `node scripts/verify-desktop-package.mjs`, which fails on any missing file or native addon |
+| Packaged `MediMart.exe` starts its own server, migrates a fresh database, serves health and the interface | **Verified by the packaged self-test** (`MEDIMART_DESKTOP_DIAGNOSTICS`), inside the Electron runtime       |
+| The desktop window itself opens                                                                           | **Verified** by launching the packaged application and capturing the screen as an uploaded artifact        |
+| Backup creation, verification and restore preparation                                                     | **Verified** by automated tests against real files on disk                                                 |
+| A physical Windows 10 computer with the owner's own hardware                                              | **Not covered by CI.** The runner is a virtual machine; the shop's own machine is the final confirmation.  |
 
 Known limitations: there is no code-signing certificate, so SmartScreen shows a warning on first run;
 there is no Windows Installer (`.msi`) or auto-update; and the taskbar icon comes from the window,

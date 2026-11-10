@@ -6,9 +6,21 @@ there" and "the APK works on a phone" are different claims.
 
 ## Current status
 
-**Generated and synchronized, not compiled. No APK has been built, signed, installed or verified here.**
+**The APK is built, installed and launched by CI, not by this documentation.**
 
-The sandbox has Node/npm and native Node build tools but no Java, Android SDK, Android emulator or system Gradle. Its network allowlist also excludes the usual Google/Maven/Gradle distribution hosts. Successful `cap add`/`cap sync` is not an APK build.
+`.github/workflows/android.yml` (job _apk_) compiles the real debug APK with Gradle, verifies its
+package id, permissions and contents from the APK file itself, and uploads it as
+**`MediMart-Android`**. Job _device_ installs that exact APK in an Android 8.1 emulator, launches it,
+captures the screen and the logcat, fails on any `FATAL EXCEPTION`, and runs
+`scripts/test-android-pairing.ts` against a live server on the emulator's host (`10.0.2.2`) so the
+pairing code, device session, offline push, replay and revocation paths are exercised over a network
+that is _not_ `localhost`.
+
+A build on a developer machine uses the same command:
+
+```bash
+node scripts/build-apk.mjs --profile debug     # → dist/android/medimart-debug.apk
+```
 
 | Item                                | Configuration                                            |
 | ----------------------------------- | -------------------------------------------------------- |
@@ -23,7 +35,7 @@ The sandbox has Node/npm and native Node build tools but no Java, Android SDK, A
 | Android SDK                         | min 24, compile 36, target 36                            |
 | Android Gradle Plugin               | 8.13.2 (aligned with the secure-storage plugin)          |
 | Gradle wrapper                      | 8.14.3                                                   |
-| WebView minimum configured          | 110; bundled non-destructive fallback page               |
+| WebView minimum configured          | 104; bundled non-destructive fallback page               |
 | Web assets                          | `apps/web/dist`, copied into native assets by `cap sync` |
 | Runtime startup URL                 | **None. No `server.url` configured.**                    |
 

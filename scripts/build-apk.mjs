@@ -13,6 +13,7 @@
  * non-zero after printing exactly what is missing.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
+import { runNpm } from './npm-run.mjs';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -24,7 +25,6 @@ if (!['debug', 'release'].includes(profile)) {
   process.exit(2);
 }
 const isWindows = process.platform === 'win32';
-const npm = isWindows ? 'npm.cmd' : 'npm';
 
 function require(command, hint) {
   const probe = spawnSync(isWindows ? 'where' : 'which', [command], { encoding: 'utf8' });
@@ -60,10 +60,7 @@ if (!ok) {
 
 const gradle = isWindows ? 'gradlew.bat' : './gradlew';
 console.log(`1/4 Building web assets for the ${profile} profile…`);
-execFileSync(npm, ['run', profile === 'debug' ? 'android:sync:dev' : 'android:sync'], {
-  cwd: root,
-  stdio: 'inherit',
-});
+runNpm(['run', profile === 'debug' ? 'android:sync:dev' : 'android:sync'], { cwd: root });
 
 console.log('2/4 Running Gradle…');
 const tasks = profile === 'debug' ? ['assembleDebug'] : ['assembleRelease'];

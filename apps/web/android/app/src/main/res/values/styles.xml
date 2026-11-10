@@ -10,10 +10,18 @@
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
     </style>
-    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_logo_medimart</item>
-        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-        <item name="android:background">@drawable/splash</item>
+    <!--
+      The launch theme deliberately does NOT use Theme.SplashScreen. The AndroidX splash screen
+      library installs itself through a ContentProvider; when the theme's postSplashScreenTheme
+      or the provider is missing, the launch window never hands over and the application shows a
+      blank screen while the WebView is actually running behind it. A plain window background is
+      predictable on Android 7 through 15 and still shows the MediMart identity immediately.
+    -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:statusBarColor">@color/splash_background</item>
+        <item name="android:navigationBarColor">@color/splash_background</item>
     </style>
 </resources>
