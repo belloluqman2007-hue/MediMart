@@ -508,17 +508,32 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   await page.reload();
   await signIn(page, clinical);
   await page.goto('/#/patients/new');
-  await page.getByLabel('Full name', { exact: true }).fill('Synthetic Patient Browser');
+  // Unique per attempt: a name already on file raises the duplicate-patient warning, which
+  // correctly refuses to save until a reason is given — that would make a retry fail for a reason
+  // that has nothing to do with the workflow under test.
+  const patientName = `Synthetic Patient ${attempt}`;
+  await page.getByLabel('Full name', { exact: true }).fill(patientName);
   await page.getByLabel('Date of birth', { exact: true }).fill('1990-01-01');
-  await page.getByLabel('Phone number', { exact: true }).fill('0005550123');
+  // The duplicate check applies to the phone number as well as the name.
+  await page.getByLabel('Phone number', { exact: true }).fill(`000555${attempt.slice(0, 4)}`);
   await page
     .getByLabel('Known allergies (record unknown or none known explicitly)')
     .fill('Synthetic allergy — review required');
   await page.screenshot({ path: 'docs/screenshots/phase4-registration.png', fullPage: true });
   await page.getByRole('button', { name: 'Save patient', exact: true }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Synthetic Patient Browser', exact: true }),
-  ).toBeVisible();
+  // Wait for the profile route rather than only the heading, and report the form's own message when
+  // the server refuses the record (for example a duplicate warning) instead of timing out blind.
+  try {
+    await expect(page).toHaveURL(/#\/patients\/[^/]+$/, { timeout: 20_000 });
+  } catch {
+    const refusal = await page
+      .locator('.alert, [role="alert"]')
+      .first()
+      .innerText()
+      .catch(() => '');
+    throw new Error(`Saving the patient did not reach the profile page. Screen said: ${refusal}`);
+  }
+  await expect(page.getByRole('heading', { name: patientName, exact: true })).toBeVisible();
   const patientId = page.url().split('/patients/')[1]!;
   await page.getByText('Record vital signs', { exact: true }).click();
   await page.getByLabel('Weight (kg)', { exact: true }).fill('80');
@@ -538,6 +553,20 @@ test('Phase 4 synthetic patient journey, prescribing and FEFO dispensing', async
   await page.getByLabel('Treatment plan', { exact: true }).fill('Synthetic plan for test only');
   await page.screenshot({ path: 'docs/screenshots/phase4-consultation.png', fullPage: true });
   await page.getByRole('button', { name: 'Save consultation', exact: true }).click();
+  // Assert the navigation the save performs, then the recorded consultation. Asserting the typed
+  // text alone can match the form itself, which hides a save that never completed.
+  try {
+    await expect(page).toHaveURL(/#\/patients\/[^/]+$/, { timeout: 20_000 });
+  } catch {
+    const refusal = await page
+      .locator('.alert, [role="alert"]')
+      .first()
+      .innerText()
+      .catch(() => '');
+    throw new Error(
+      `Saving the consultation did not reach the profile page. Screen said: ${refusal}`,
+    );
+  }
   await expect(
     page.getByText('Synthetic complaint for workflow testing', { exact: true }),
   ).toBeVisible();
