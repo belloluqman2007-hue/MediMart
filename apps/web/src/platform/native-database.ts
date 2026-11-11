@@ -284,9 +284,7 @@ function createDriver(sqlite: SQLiteConnection, connection: SQLiteDBConnection):
 
 /** True only for Android Framework's "statement returns rows" rejection from SQLiteDatabase.execSQL. */
 function isExecSqlQueryError(error: unknown) {
-  return describeError(error)
-    .toLowerCase()
-    .includes('queries can be performed');
+  return describeError(error).toLowerCase().includes('queries can be performed');
 }
 
 function toStartupError(error: unknown) {
