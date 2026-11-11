@@ -2039,6 +2039,19 @@ kbd {
 .startup-failure .button {
   margin-bottom: 25px;
 }
+.startup-failure-detail {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 12px;
+}
+.startup-failure-detail code {
+  background: #f2f3ef;
+  border-radius: 4px;
+  padding: 2px 6px;
+  display: inline-block;
+  text-align: left;
+}
 /* Authentication: local assets only, with a calm, deliberately distinct entry screen. */
 .auth-page {
   min-height: 100dvh;

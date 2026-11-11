@@ -225,12 +225,19 @@ function generateSecret() {
 }
 
 async function applyConnectionPragmas(db: SerializedDatabase) {
-  // journal_mode returns a row ("wal"), so it is a query. PRAGMA foreign_keys is silently a no-op
-  // inside a transaction and must be verified, not assumed.
-  await db.run('PRAGMA foreign_keys=ON;');
+  // EVERY pragma goes through the query path (`all`), never the `run`/execSQL path. Android's
+  // SQLiteDatabase.execSQL refuses any statement that returns rows: "Queries can be performed using
+  // SQLiteDatabase query or rawQuery methods only." `PRAGMA busy_timeout=N` and
+  // `PRAGMA journal_mode=...` do return a row, and sending busy_timeout through execSQL aborted
+  // every Android startup at this point with a misleading "unknown error (code 0)" — on every
+  // device and emulator, regardless of the Keystore's health. `db.all` is correct for PRAGMAs
+  // that return no rows too: the plugin's `query` simply sees an empty result, which is fine.
+  //
+  // PRAGMA foreign_keys is silently a no-op inside a transaction and must be verified, not assumed.
+  await db.all('PRAGMA foreign_keys=ON;');
   await db.all('PRAGMA journal_mode=WAL;');
-  await db.run('PRAGMA synchronous=FULL;');
-  await db.run('PRAGMA busy_timeout=5000;');
+  await db.all('PRAGMA synchronous=FULL;');
+  await db.all('PRAGMA busy_timeout=5000;');
   const foreignKeys = (await db.all<{ foreign_keys: number }>('PRAGMA foreign_keys;'))[0]
     ?.foreign_keys;
   if (foreignKeys !== 1)
@@ -244,10 +251,25 @@ async function applyConnectionPragmas(db: SerializedDatabase) {
 function createDriver(sqlite: SQLiteConnection, connection: SQLiteDBConnection): SqlDriver {
   return {
     async run(sql, values = []) {
-      const result = values.length
-        ? await connection.run(sql, [...values], false)
-        : await connection.execute(sql, false);
-      return { changes: result.changes?.changes ?? 0 };
+      if (values.length) {
+        const result = await connection.run(sql, [...values], false);
+        return { changes: result.changes?.changes ?? 0 };
+      }
+      try {
+        const result = await connection.execute(sql, false);
+        return { changes: result.changes?.changes ?? 0 };
+      } catch (error) {
+        // Android's execSQL refuses any statement whose prepared program has columns. That is not
+        // limited to SELECTs: ALTER TABLE ... ADD COLUMN ... CHECK (...) carries SQLite's implicit
+        // quick_check program and is reported as returning a row. Migrations are immutable and
+        // checksummed, so the statement cannot simply be rewritten — the same statement must run,
+        // it just may not run through execSQL. rawQuery runs it; the returned cursor (a quick_check
+        // line nobody reads) is discarded. Only this exact Framework error is retried, never any
+        // other failure.
+        if (!isExecSqlQueryError(error)) throw error;
+        await connection.query(sql, []);
+        return { changes: 0 };
+      }
     },
     async all<T extends SqlRow>(sql: string, values = []) {
       // `query` (not `execute`) is the call that returns rows; PRAGMA reads and RETURNING clauses
@@ -258,6 +280,11 @@ function createDriver(sqlite: SQLiteConnection, connection: SQLiteDBConnection):
       await sqlite.closeConnection(DATABASE, READONLY);
     },
   };
+}
+
+/** True only for Android Framework's "statement returns rows" rejection from SQLiteDatabase.execSQL. */
+function isExecSqlQueryError(error: unknown) {
+  return describeError(error).toLowerCase().includes('queries can be performed');
 }
 
 function toStartupError(error: unknown) {
