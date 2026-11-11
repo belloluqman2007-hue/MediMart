@@ -133,14 +133,25 @@ vi.mock('@capacitor-community/sqlite', async () => {
           },
           execute: async (sql: string) => {
             if (!this.opened) throw new Error('database medimart not opened');
-            db.exec(sql);
+            // Android's SQLiteDatabase.execSQL refuses any statement that returns rows, exactly as
+            // the real runtime behaves; a mock that silently accepts row-returning PRAGMAs would
+            // pass code that dies on every phone ("Queries can be performed using SQLiteDatabase
+            // query or rawQuery methods only").
+            const statement = db.prepare(sql);
+            if (statement.reader)
+              throw new Error(
+                'Queries can be performed using SQLiteDatabase query or rawQuery methods only.',
+              );
+            statement.run();
             return { changes: { changes: 0 } };
           },
-          // The real plugin returns rows only from `query`; `execute` never does. PRAGMAs that
-          // return a row (journal_mode, foreign_keys) must therefore go through `query`.
+          // The real plugin returns rows only from `query`; `execute` never does. Statements that
+          // return no rows (e.g. PRAGMA foreign_keys=ON) see an empty result set through query,
+          // exactly as Android's rawQuery does.
           query: async (sql: string, values: unknown[] = []) => {
             if (!this.opened) throw new Error('database medimart not opened');
-            return { values: db.prepare(sql).all(...values) };
+            const statement = db.prepare(sql);
+            return { values: statement.reader ? statement.all(...values) : [] };
           },
           run: async (sql: string, values: unknown[] = []) => {
             if (!this.opened) throw new Error('database medimart not opened');
