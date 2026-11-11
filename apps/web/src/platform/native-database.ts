@@ -25,9 +25,7 @@ const READONLY = false;
 /** The plugin refuses a passphrase it did not generate? No — but it must be 32 bytes of entropy. */
 const SECRET_BYTES = 32;
 
-type SQLiteConnection = InstanceType<
-  typeof import('@capacitor-community/sqlite').SQLiteConnection
->;
+type SQLiteConnection = InstanceType<typeof import('@capacitor-community/sqlite').SQLiteConnection>;
 type SQLiteDBConnection = Awaited<ReturnType<SQLiteConnection['createConnection']>>;
 
 /** What the initializer needed to do, for the log and for the report. */
@@ -68,7 +66,11 @@ export function resetNativeDatabaseForTests() {
 
 async function initialize(): Promise<NativeDatabase> {
   if (!Capacitor.isNativePlatform())
-    throw new StartupError('database', 'not-native', 'Native SQLite is unavailable on this platform.');
+    throw new StartupError(
+      'database',
+      'not-native',
+      'Native SQLite is unavailable on this platform.',
+    );
 
   startupLog.info('database', 'Opening the encrypted local database');
   const { CapacitorSQLite, SQLiteConnection } = await import('@capacitor-community/sqlite');
@@ -97,9 +99,13 @@ async function initialize(): Promise<NativeDatabase> {
       } catch (error) {
         // The registry claimed a connection the Java side does not have. Closing the stale entry and
         // creating a fresh connection is safe: the database file itself is untouched.
-        startupLog.warn('database', 'Stale connection entry discarded; reopening the database file', {
-          reason: classifyDatabaseError(error),
-        });
+        startupLog.warn(
+          'database',
+          'Stale connection entry discarded; reopening the database file',
+          {
+            reason: classifyDatabaseError(error),
+          },
+        );
         await sqlite.closeConnection(DATABASE, READONLY).catch(() => undefined);
         connection = await sqlite.createConnection(DATABASE, true, 'secret', 1, READONLY);
       }
@@ -221,10 +227,7 @@ async function applyConnectionPragmas(db: SerializedDatabase) {
     );
 }
 
-function createDriver(
-  sqlite: SQLiteConnection,
-  connection: SQLiteDBConnection,
-): SqlDriver {
+function createDriver(sqlite: SQLiteConnection, connection: SQLiteDBConnection): SqlDriver {
   return {
     async run(sql, values = []) {
       const result = values.length

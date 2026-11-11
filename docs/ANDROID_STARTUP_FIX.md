@@ -37,16 +37,16 @@ await connection.open();
 Four concrete problems, each verified against the plugin's own source
 (`@capacitor-community/sqlite` 8.1.1, `node_modules/…/android/src/main/java/…`):
 
-| # | Problem | Why it fails on a real device |
-| - | ------- | ---------------------------- |
-| A | **No read-back of a stored key.** `isSecretStored()` only answers "is a string present". If the Android Keystore entry becomes unusable, the plugin's `EncryptedSharedPreferences` cannot be decrypted and the call throws — or returns a passphrase that no longer matches the database. Nothing between generate and store proves the key can be used again. | Recovery of the documented "Keystore exists but is unusable" failure, or a passphrase that never reached disk, is impossible: the app keeps a key it cannot use and never says so. |
-| B | **Stale connection registry.** The plugin keeps its connection dictionary in JavaScript module state (`_connectionDict`) while the Java side (`dbDict`) does not survive a WebView reload. `checkConnectionsConsistency()` is called *after* the secret check, compares only the JS side, and after a reload `retrieveConnection()` therefore throws `No available connection for database medimart`. | After an Activity recreation / WebView reload the connection cannot be retrieved; the previous code had no recovery, so start-up aborted. |
-| C | **Rows were never read.** `PRAGMA journal_mode=WAL;` and `PRAGMA foreign_keys;` were sent through `connection.query()` only for the WAL one, and `execute()` was used for `PRAGMA synchronous`/`busy_timeout`. The plugin returns rows **only** from `query`; and `PRAGMA foreign_keys` is silently a no-op inside a transaction, so its value must be *read back*, not assumed. | A mis-set pragma throws or silently disables enforcement — and the failure surfaces as an unexplained start-up abort. |
-| D | **`androidBiometric` enabled in a configuration that nothing unlocks.** The plugin builds that path *inside `load()`*; any exception there leaves `implementation = null` in the plugin and its `loadMessage` becomes the answer to every call: `CapacitorSQLitePlugin: null`. | Every SQLite call fails with a message that names no cause — precisely the "could not initialize its secure database" report. |
+| #   | Problem                                                                                                                                                                                                                                                                                                                                                                                               | Why it fails on a real device                                                                                                                                                      |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A   | **No read-back of a stored key.** `isSecretStored()` only answers "is a string present". If the Android Keystore entry becomes unusable, the plugin's `EncryptedSharedPreferences` cannot be decrypted and the call throws — or returns a passphrase that no longer matches the database. Nothing between generate and store proves the key can be used again.                                        | Recovery of the documented "Keystore exists but is unusable" failure, or a passphrase that never reached disk, is impossible: the app keeps a key it cannot use and never says so. |
+| B   | **Stale connection registry.** The plugin keeps its connection dictionary in JavaScript module state (`_connectionDict`) while the Java side (`dbDict`) does not survive a WebView reload. `checkConnectionsConsistency()` is called _after_ the secret check, compares only the JS side, and after a reload `retrieveConnection()` therefore throws `No available connection for database medimart`. | After an Activity recreation / WebView reload the connection cannot be retrieved; the previous code had no recovery, so start-up aborted.                                          |
+| C   | **Rows were never read.** `PRAGMA journal_mode=WAL;` and `PRAGMA foreign_keys;` were sent through `connection.query()` only for the WAL one, and `execute()` was used for `PRAGMA synchronous`/`busy_timeout`. The plugin returns rows **only** from `query`; and `PRAGMA foreign_keys` is silently a no-op inside a transaction, so its value must be _read back_, not assumed.                      | A mis-set pragma throws or silently disables enforcement — and the failure surfaces as an unexplained start-up abort.                                                              |
+| D   | **`androidBiometric` enabled in a configuration that nothing unlocks.** The plugin builds that path _inside `load()`_; any exception there leaves `implementation = null` in the plugin and its `loadMessage` becomes the answer to every call: `CapacitorSQLitePlugin: null`.                                                                                                                        | Every SQLite call fails with a message that names no cause — precisely the "could not initialize its secure database" report.                                                      |
 
 The native dependency chain is `androidx.security:security-crypto:1.1.0-alpha06` +
 `MasterKey(AES256_GCM)` for the passphrase store, and `net.zetetic:sqlcipher-android:4.17.0` for the
-database. Both support API 27; the compatibility question is whether *this device's* Keystore and ABI
+database. Both support API 27; the compatibility question is whether _this device's_ Keystore and ABI
 can actually provide them, which nothing in the application previously checked.
 
 ## 2. Root cause
@@ -58,7 +58,7 @@ can actually provide them, which nothing in the application previously checked.
 > became the same unactionable "secure database" screen, with no diagnostic and no recovery path
 > that preserved the data.**
 
-This is a *reliability and diagnosability* root cause, not a "wrong API" bug. The requirements fix
+This is a _reliability and diagnosability_ root cause, not a "wrong API" bug. The requirements fix
 (data preserved, never recreate the database, never fall back to unencrypted/temporary storage) were
 already stated in the documentation but **not enforced or verifiable in code**, and there was no
 native evidence channel at all. That is what this branch adds.
@@ -83,7 +83,7 @@ native evidence channel at all. That is what this branch adds.
 - **Restart / app update:** existing key is read back and reused; **never regenerated**.
 - **Key unreadable:** reported as `keystore-key-unusable`; no key is generated, no database is
   opened with a different key, nothing is deleted.
-- **Stale connection:** the registry entry is closed and the *same file* is re-opened; the file is
+- **Stale connection:** the registry entry is closed and the _same file_ is re-opened; the file is
   never deleted or recreated.
 - **Verified pragmas:** `foreign_keys` is read back and start-up fails if it is not `1`;
   `journal_mode` goes through `query` because only that call returns rows.
@@ -145,14 +145,14 @@ loaded, no-secret-in-logs, and migration state.
 
 ### 4.1 Local (this sandbox: Node 22, no JDK, no Android SDK, no `/dev/kvm`)
 
-| Command | Result |
-| ------- | ------ |
-| `npx tsc --noEmit` | clean |
-| `npx eslint apps/web/src/platform tests/platform.test.ts packages/database/src/migrate.ts` | clean |
-| `npx vitest run` | **155+ tests, all passing** (see the run attached to the PR) |
-| `npx vitest run tests/platform.test.ts` | **19 tests passing** (10 pre-existing + 9 new) |
-| `npm run check` (typecheck, lint, unit, build, production smoke) | passed |
-| `npm run android:sync` | 4 plugins found, `capacitor.config.json` emitted with `androidIsEncryption: true` |
+| Command                                                                                    | Result                                                                            |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `npx tsc --noEmit`                                                                         | clean                                                                             |
+| `npx eslint apps/web/src/platform tests/platform.test.ts packages/database/src/migrate.ts` | clean                                                                             |
+| `npx vitest run`                                                                           | **155+ tests, all passing** (see the run attached to the PR)                      |
+| `npx vitest run tests/platform.test.ts`                                                    | **19 tests passing** (10 pre-existing + 9 new)                                    |
+| `npm run check` (typecheck, lint, unit, build, production smoke)                           | passed                                                                            |
+| `npm run android:sync`                                                                     | 4 plugins found, `capacitor.config.json` emitted with `androidIsEncryption: true` |
 
 ### 4.2 Emulator (GitHub Actions: JDK 21, Android SDK, KVM, API 30 and API 27)
 
@@ -163,7 +163,7 @@ loaded, no-secret-in-logs, and migration state.
 ## 5. Installation instructions
 
 The APK is the CI artefact **`MediMart-Android`** on the workflow run for this branch
-(Actions → *Android build, install and run* → latest run → Artifacts).
+(Actions → _Android build, install and run_ → latest run → Artifacts).
 
 1. Download and unzip `MediMart-Android.zip` → `medimart-debug.apk`.
 2. Send it to the phone (USB, Bluetooth or a file-sharing app you trust).

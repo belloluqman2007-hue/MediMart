@@ -95,8 +95,8 @@ export function StartupFailure({
       )}
       {storage && (
         <p className="small muted">
-          If this continues, contact your administrator and give them the diagnostic code above.
-          The application has not deleted, reset or replaced your database, and it has not stored
+          If this continues, contact your administrator and give them the diagnostic code above. The
+          application has not deleted, reset or replaced your database, and it has not stored
           anything unencrypted.
         </p>
       )}

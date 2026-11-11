@@ -100,7 +100,8 @@ vi.mock('@capacitor-community/sqlite', async () => {
         bridge.createOptions = options;
         const name = connectionKey(String(options[0]));
         if (bridge.connections.has(name)) throw new Error(`Connection ${name} already exists`);
-        if (options[2] === 'secret' && !bridge.secretStored) throw new Error('No Passphrase stored');
+        if (options[2] === 'secret' && !bridge.secretStored)
+          throw new Error('No Passphrase stored');
         bridge.connections.add(name);
         bridge.dangling.delete(name);
         return this.connectionHandle();
@@ -267,7 +268,11 @@ describe('Android secure database first launch, restart and failure handling', (
 
   it('stores a 256-bit key on first launch, opens SQLCipher with it, and never uses no-encryption', async () => {
     const { outcome } = await coldStart();
-    expect(outcome).toMatchObject({ secretSource: 'generated', migrated: true, connection: 'created' });
+    expect(outcome).toMatchObject({
+      secretSource: 'generated',
+      migrated: true,
+      connection: 'created',
+    });
     expect(bridge.secret).toMatch(/^[a-f0-9]{64}$/);
     // ['medimart', encrypted=true, mode='secret', version, readonly=false]
     expect(bridge.createOptions[2]).toBe('secret');

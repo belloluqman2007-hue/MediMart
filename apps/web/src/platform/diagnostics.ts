@@ -51,7 +51,10 @@ export class StartupError extends Error {
  */
 const SECRET_PATTERNS: readonly [RegExp, string][] = [
   // "passphrase=...", "secret: ...", "token=..." style assignments.
-  [/("?(?:passphrase|password|secret|newsecret|token|authorization|api[_-]?key)"?\s*[:=]\s*)("?)[^"',;\s}]+/gi, '$1$2[redacted]'],
+  [
+    /("?(?:passphrase|password|secret|newsecret|token|authorization|api[_-]?key)"?\s*[:=]\s*)("?)[^"',;\s}]+/gi,
+    '$1$2[redacted]',
+  ],
   // Long hexadecimal runs (generated 256-bit secrets and fingerprints).
   [/\b[0-9a-f]{32,}\b/gi, '[redacted-hex]'],
   // Long Base64/Base64URL runs (Keystore-wrapped material, JWT segments).
@@ -147,7 +150,11 @@ export function classifyDatabaseError(error: unknown): string {
 /** Build the value shown on the failure screen and written to logcat. */
 export function describeStartupFailure(error: unknown): StartupFailureInfo {
   if (error instanceof StartupError) {
-    return { stage: error.stage, code: `${error.stage}:${error.code}`, detail: describeError(error) };
+    return {
+      stage: error.stage,
+      code: `${error.stage}:${error.code}`,
+      detail: describeError(error),
+    };
   }
   return {
     stage: 'unknown',
