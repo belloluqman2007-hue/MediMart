@@ -29,9 +29,23 @@ const config: CapacitorConfig = {
     // half-working screen, and a phone that was already supported keeps working.
     minWebViewVersion: 104,
   },
+  /*
+   * The SQLite plugin must stay in encryption mode. With `androidIsEncryption: false` the plugin
+   * refuses `createConnection(..., encrypted = true, 'secret', ...)` outright, and the only way to
+   * open a database would be unencrypted — which this application never does.
+   *
+   * A note for whoever debugs this next: the plugin swallows a failure inside its `load()` (it
+   * creates the Android Keystore master key and EncryptedSharedPreferences there) and then answers
+   * every later call with the useless message "CapacitorSQLitePlugin: null". That is why startup
+   * diagnostics exist in two places: `StartupSelfCheck` (native, logcat tag MediMartStartup) proves
+   * Keystore and SQLCipher independently before the WebView loads, and
+   * `apps/web/src/platform/diagnostics.ts` classifies what JavaScript receives.
+   */
   plugins: {
     CapacitorSQLite: {
       androidIsEncryption: true,
+      // Biometric unlock would block startup behind a prompt nobody can answer on a shared shop
+      // phone, and it is not how this application gates access (staff sign-in is).
       androidBiometric: { biometricAuth: false, biometricTitle: 'MediMart' },
     },
   },
