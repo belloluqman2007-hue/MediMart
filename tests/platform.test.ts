@@ -32,6 +32,8 @@ const bridge = vi.hoisted(() => ({
   connections: new Set<string>(),
   /** Connection names the Java side has lost while JavaScript still lists them. */
   dangling: new Set<string>(),
+  /** Open better-sqlite3 handles. Closed explicitly so Windows can delete the temp directory. */
+  handles: [] as { close(): void }[],
   calls: [] as string[],
 }));
 
@@ -110,11 +112,18 @@ vi.mock('@capacitor-community/sqlite', async () => {
         bridge.closeCount++;
         bridge.connections.delete(connectionKey(database));
         this.opened = false;
-        this.connection?.close();
+        if (this.connection) {
+          const index = bridge.handles.indexOf(this.connection);
+          if (index >= 0) bridge.handles.splice(index, 1);
+          this.connection.close();
+        }
         this.connection = null;
       }
       private connectionHandle() {
-        if (!this.connection) this.connection = new Sqlite(bridge.filename);
+        if (!this.connection) {
+          this.connection = new Sqlite(bridge.filename);
+          bridge.handles.push(this.connection);
+        }
         const db = this.connection;
         return {
           open: async () => {
@@ -157,6 +166,7 @@ beforeEach(() => {
   bridge.closeCount = 0;
   bridge.failures = {};
   bridge.createOptions = [];
+  bridge.handles = [];
   bridge.connections.clear();
   bridge.dangling.clear();
   bridge.calls = [];
@@ -166,13 +176,33 @@ beforeEach(() => {
 
 /** The initializer memoizes its result per page load, exactly like a real WebView. */
 async function resetNativeDatabase() {
-  const module = await import('../apps/web/src/platform/native-database');
-  module.resetNativeDatabaseForTests();
+  const { resetNativeDatabaseForTests } = await import('../apps/web/src/platform/native-database');
+  await resetNativeDatabaseForTests();
 }
+/** Close any handle a test left registered, as the plugin's own close would. */
+function closeLeftoverHandles() {
+  for (const handle of [...bridge.handles]) {
+    try {
+      handle.close();
+    } catch {
+      // Already closed by the test.
+    }
+  }
+  bridge.handles.length = 0;
+  bridge.connections.clear();
+}
+
 afterEach(async () => {
   await runtime?.database?.close();
+  runtime = null;
+  // Handles opened through `openNativeDatabase()` are not all reachable through `runtime`, and a
+  // test that leaves one open fails on Windows (the temporary directory cannot be deleted). Close
+  // them all before removing the directory.
+  await resetNativeDatabase();
+  closeLeftoverHandles();
   vi.unstubAllGlobals();
-  rmSync(directory, { recursive: true, force: true });
+  vi.restoreAllMocks();
+  rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 describe('native storage adapter contract (mock bridge, not an Android device)', () => {
   it('requests encrypted SQLite and runs the same real SQL migrations through the adapter', async () => {
@@ -254,10 +284,9 @@ describe('Android secure database first launch, restart and failure handling', (
    * module memory, so a reload forgets it while the encrypted file and Keystore key survive.
    */
   async function reloadWebView() {
-    bridge.connections.clear();
+    closeLeftoverHandles();
     bridge.calls = [];
-    const module = await import('../apps/web/src/platform/native-database');
-    module.resetNativeDatabaseForTests();
+    await resetNativeDatabase();
   }
 
   /** Open the database the way the app does on a cold start. */

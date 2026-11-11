@@ -59,9 +59,23 @@ export function openNativeDatabase(): Promise<NativeDatabase> {
   return initialization;
 }
 
-/** Reset the memoized result. Only for tests; production code reloads the page instead. */
-export function resetNativeDatabaseForTests() {
+/**
+ * Close whatever this module opened and forget the memoized result. Only for tests; production code
+ * reloads the page instead.
+ *
+ * Closing matters on Windows: a still-open SQLite handle cannot be deleted, so a test that leaves
+ * one behind fails in `afterEach` there and nowhere else.
+ */
+export async function resetNativeDatabaseForTests() {
+  const current = initialization;
   initialization = undefined;
+  if (!current) return;
+  try {
+    const { db } = await current;
+    await db.close();
+  } catch {
+    // A failed initialization holds no open handle.
+  }
 }
 
 async function initialize(): Promise<NativeDatabase> {
