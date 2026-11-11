@@ -111,6 +111,29 @@ It catches every `Throwable`, so it can never crash start-up, and it logs no sec
 The failure screen now shows the diagnostic code and states plainly that nothing was deleted,
 reset, replaced or stored unencrypted. The error is logged (redacted) instead of discarded.
 
+### Build identity (added on `arena/d59e5a56-medimart`)
+
+The diagnostic code names _what_ failed. It could not name _which build_ failed, and that turned out
+to matter immediately: the first support report after this fix arrived from a phone whose screen
+showed no code at all, and the two APKs available that day both reported `versionName 0.2.0` /
+`versionCode 2` — one built before the fix, one after. Nothing on the phone, in the artifact, or in
+Settings → Apps could tell them apart.
+
+- `apps/web/vite.config.ts` compiles `__MEDIMART_BUILD__` (root package version, 8-char commit,
+  build timestamp, Vite mode) into every bundle; `apps/web/src/platform/build-info.ts` reads it and
+  degrades to `unknown` instead of throwing when a bundle carries no stamp (unit tests, a source
+  tarball with no Git).
+- `main.tsx` logs it as the **first** line of start-up, so a failure on the next line is still
+  attributable; `App.tsx` prints `Build: …` on the failure screen, so a photograph of the phone
+  answers the question.
+- `StartupSelfCheck` logs `version=<versionName>/<versionCode>` from the package manager — before
+  any WebView exists, which is exactly when start-up can fail too early to log anything else.
+- `versionCode 3` / `versionName "0.3.0"`, equal to the root `package.json` version;
+  `tests/build-identity.test.ts` asserts the two cannot drift and that the label is redaction-clean.
+- CI verifies the artifact instead of trusting it: the workflow asserts the APK's `versionName`
+  equals the root package version and that the packaged JavaScript contains this run's commit hash;
+  `scripts/android-emulator.sh` fails if either identity line is missing from logcat.
+
 ### `scripts/android-emulator.sh`
 
 "The app stayed open" is not evidence — the failure screen stays open too. The script now asserts,
@@ -163,7 +186,10 @@ loaded, no-secret-in-logs, and migration state.
 ## 5. Installation instructions
 
 The APK is the CI artefact **`MediMart-Android`** on the workflow run for this branch
-(Actions → _Android build, install and run_ → latest run → Artifacts).
+(Actions → _Android build, install and run_ → latest run → Artifacts). **Take it from a run whose
+commit is at or after `12f6fc4`** — artefacts from earlier runs contain the pre-fix start-up code and
+show no diagnostic code, and they report the same `versionName 0.2.0` / `versionCode 2` as each
+other, so they cannot be told apart on the phone.
 
 1. Download and unzip `MediMart-Android.zip` → `medimart-debug.apk`.
 2. Send it to the phone (USB, Bluetooth or a file-sharing app you trust).
@@ -172,7 +198,12 @@ The APK is the CI artefact **`MediMart-Android`** on the workflow run for this b
 4. Tap the APK → **Install**. Chrome's "this type of file can harm your device" warning appears for
    every APK from outside Play Store; choose **OK**.
 5. Open **MediMart**. On a healthy phone it goes straight to the sign-in screen, and logcat shows
-   `MediMartStartup … self-check ok` and `[MediMart] [database] Encrypted database ready`.
+   `MediMartStartup … environment … version=0.3.0/3`, `MediMartStartup … self-check ok` and
+   `[MediMart] [database] Encrypted database ready`.
+6. **Confirm which build is installed before reporting anything.** Settings → Apps → MediMart shows
+   version `0.3.0`; any failure screen shows `Build: 0.3.0 · <commit> · <date> · <profile>`. If
+   neither is there, the phone is still running the pre-fix APK and the report cannot be answered —
+   install the artefact from a current run over the top and look again.
 
 **Upgrading an existing installation (the reported situation):** install over the top — do **not**
 uninstall and do **not** clear app data; both destroy the only copy of the encrypted database and

@@ -4,6 +4,7 @@ import { HashRouter, Link, Route, Routes } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 import type { Runtime } from './platform/types';
 import type { StartupFailureInfo } from './platform/diagnostics';
+import { formatBuildLabel } from './platform/build-info';
 import { AppProvider } from './components/AppProvider';
 import { AppShell } from './components/AppShell';
 import { Brand, Button } from './components/ui';
@@ -95,11 +96,20 @@ export function StartupFailure({
       )}
       {storage && (
         <p className="small muted">
-          If this continues, contact your administrator and give them the diagnostic code above. The
-          application has not deleted, reset or replaced your database, and it has not stored
-          anything unencrypted.
+          If this continues, contact your administrator and give them the diagnostic code and the
+          build line below. The application has not deleted, reset or replaced your database, and it
+          has not stored anything unencrypted.
         </p>
       )}
+      {/*
+        The build stamp answers "which MediMart is installed?" from a screenshot alone. Two
+        different APKs once reported the same Android version while containing different start-up
+        code, so neither the diagnostic code nor the phone's app-info screen could say what was
+        running. See `platform/build-info.ts`.
+      */}
+      <p className="small muted">
+        Build: <code>{formatBuildLabel()}</code>
+      </p>
     </div>
   );
 }

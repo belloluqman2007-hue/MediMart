@@ -80,6 +80,20 @@ final class StartupSelfCheck {
         } catch (Throwable ignored) {
             // Only diagnostic detail; never allow it to affect startup.
         }
+        /*
+         * The installed APK's own version, read from the package manager before any WebView exists.
+         * Support needs this line to tell two APKs apart: the JavaScript build stamp only appears
+         * once the WebView is running, which is exactly what does not happen when start-up fails
+         * early. Both channels together identify the build on the phone from logcat alone.
+         */
+        String appVersion = "unknown";
+        try {
+            PackageInfo self =
+                context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            appVersion = self.versionName + "/" + self.versionCode;
+        } catch (Throwable ignored) {
+            // Only diagnostic detail; never allow it to affect startup.
+        }
         Log.i(
             TAG,
             "environment sdk="
@@ -92,6 +106,8 @@ final class StartupSelfCheck {
                 + Build.MODEL
                 + " app="
                 + context.getPackageName()
+                + " version="
+                + appVersion
                 + " webview="
                 + webView
         );

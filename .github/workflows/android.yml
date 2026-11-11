@@ -81,8 +81,23 @@ jobs:
           if unzip -p "$APK" assets/public/config.json 2>/dev/null | grep -iE 'bootstrap_token|setup_token'; then
             echo "A setup token leaked into the APK" >&2; exit 1
           fi
-          "$A" manifest version-name "$APK"
-          "$A" manifest version-code "$APK"
+          # The version a shop owner reads on the phone (Settings → Apps → MediMart) must identify
+          # this build. It is compared with the root package version, the single source of truth,
+          # so the artifact cannot drift from what the failure screen reports.
+          EXPECTED_VERSION="$(node -p "require('./package.json').version")"
+          "$A" manifest version-name "$APK" | tee /tmp/version-name.txt
+          grep -Fx "$EXPECTED_VERSION" /tmp/version-name.txt
+          "$A" manifest version-code "$APK" | tee /tmp/version-code.txt
+          grep -Eq '^[0-9]+$' /tmp/version-code.txt
+          # The bundle inside the APK must carry this commit's stamp (apps/web/vite.config.ts).
+          # This is the proof that the uploaded artifact is the code of this run — the question
+          # "which APK did I install?" was previously unanswerable from the phone.
+          SHORT_SHA="$(git rev-parse --short=8 HEAD)"
+          echo "expecting build stamp for commit ${SHORT_SHA} in the packaged bundle"
+          # Extracted to a file first: `grep -q` in a pipeline closes the pipe early, unzip then dies
+          # with SIGPIPE (141), and `pipefail` would report a healthy APK as a failed check.
+          unzip -p "$APK" 'assets/public/assets/*.js' > /tmp/bundle.js
+          grep -qF "$SHORT_SHA" /tmp/bundle.js
           # Android 7.0 (API 24) must still be installable: read the floor from the APK itself.
           "$A" manifest min-sdk "$APK" | tee /tmp/minsdk.txt
           grep -Fx 24 /tmp/minsdk.txt

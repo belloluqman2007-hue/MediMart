@@ -3,9 +3,13 @@ import { createRoot } from 'react-dom/client';
 import './fonts.css';
 import './styles.css';
 import { App, StartupFailure } from './App';
+import { buildStamp, formatBuildLabel } from './platform/build-info';
 import { describeStartupFailure, startupLog } from './platform/diagnostics';
 import { initializeRuntime } from './platform/runtime';
 const root = createRoot(document.getElementById('root')!);
+// Logged before anything else, and therefore present in logcat even when start-up fails on the
+// first line: the build identity is what turns "it says the database failed" into an answer.
+startupLog.info('build', `MediMart ${formatBuildLabel()}`, { ...buildStamp });
 void initializeRuntime()
   .then((runtime) => {
     root.render(

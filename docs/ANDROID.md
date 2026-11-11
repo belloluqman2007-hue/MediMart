@@ -22,22 +22,22 @@ A build on a developer machine uses the same command:
 node scripts/build-apk.mjs --profile debug     # → dist/android/medimart-debug.apk
 ```
 
-| Item                                | Configuration                                            |
-| ----------------------------------- | -------------------------------------------------------- |
-| Permanent app ID / Java namespace   | `com.medimart.app`                                       |
-| App name                            | `MediMart`                                               |
-| App version                         | `0.2.0`, versionCode 2                                   |
-| Capacitor core / Android / CLI      | 8.6.0                                                    |
-| Native SQLite plugin                | `@capacitor-community/sqlite` 8.1.1                      |
-| Native secure storage               | `@aparajita/capacitor-secure-storage` 8.0.1              |
-| SQLCipher declared by SQLite plugin | 4.17.0                                                   |
-| Java toolchain required             | JDK 21                                                   |
-| Android SDK                         | min 24, compile 36, target 36                            |
-| Android Gradle Plugin               | 8.13.2 (aligned with the secure-storage plugin)          |
-| Gradle wrapper                      | 8.14.3                                                   |
-| WebView minimum configured          | 104; bundled non-destructive fallback page               |
-| Web assets                          | `apps/web/dist`, copied into native assets by `cap sync` |
-| Runtime startup URL                 | **None. No `server.url` configured.**                    |
+| Item                                | Configuration                                                       |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| Permanent app ID / Java namespace   | `com.medimart.app`                                                  |
+| App name                            | `MediMart`                                                          |
+| App version                         | `0.3.0`, versionCode 3 (must equal the root `package.json` version) |
+| Capacitor core / Android / CLI      | 8.6.0                                                               |
+| Native SQLite plugin                | `@capacitor-community/sqlite` 8.1.1                                 |
+| Native secure storage               | `@aparajita/capacitor-secure-storage` 8.0.1                         |
+| SQLCipher declared by SQLite plugin | 4.17.0                                                              |
+| Java toolchain required             | JDK 21                                                              |
+| Android SDK                         | min 24, compile 36, target 36                                       |
+| Android Gradle Plugin               | 8.13.2 (aligned with the secure-storage plugin)                     |
+| Gradle wrapper                      | 8.14.3                                                              |
+| WebView minimum configured          | 104; bundled non-destructive fallback page                          |
+| Web assets                          | `apps/web/dist`, copied into native assets by `cap sync`            |
+| Runtime startup URL                 | **None. No `server.url` configured.**                               |
 
 Node package compatibility, TypeScript types, plugin discovery and generated project files were checked. Native Gradle dependency resolution and APK/runtime compatibility are still a release gate.
 
@@ -176,15 +176,19 @@ When the phone cannot reach the shop computer (Wi-Fi dropped, computer asleep, r
 
 See [ANDROID_STARTUP_FIX.md](ANDROID_STARTUP_FIX.md) for the full investigation. In short:
 
-1. Before the WebView exists, `StartupSelfCheck` writes the device/WebView versions and proves the
-   Android Keystore can generate and use an AES-256/GCM key, and that the SQLCipher library loads
-   (logcat tag **`MediMartStartup`**). It never logs a key and cannot crash the application.
-2. The app then generates a 256-bit passphrase on first launch, or reuses the stored one on every
+1. Before the WebView exists, `StartupSelfCheck` writes the **installed APK version**
+   (`version=<versionName>/<versionCode>`), the device and WebView versions, and proves the Android
+   Keystore can generate and use an AES-256/GCM key, and that the SQLCipher library loads (logcat tag
+   **`MediMartStartup`**). It never logs a key and cannot crash the application.
+2. The bundle then logs its own compiled identity as its first line —
+   `[MediMart] [build] MediMart 0.3.0 · a1b2c3d4 · 2026-11-11 · production` — so even a failure on
+   the next line still says which build produced it. The same line is printed on the failure screen.
+3. The app then generates a 256-bit passphrase on first launch, or reuses the stored one on every
    later launch, and **reads it back** before the first write. A key that cannot be read back is
    reported, never replaced.
-3. The encrypted database is opened, foreign-key enforcement is read back and migrations run; the
+4. The encrypted database is opened, foreign-key enforcement is read back and migrations run; the
    app logs `[MediMart] [database] Encrypted database ready` with the schema version.
-4. If anything in that chain fails, the failure screen shows a **diagnostic code** such as
+5. If anything in that chain fails, the failure screen shows a **diagnostic code** such as
    `database:keystore-key-unusable` or `database:database-key-mismatch` and says explicitly that
    nothing was deleted, recreated or stored unencrypted. Collect the code plus
    `adb logcat -s MediMartStartup Capacitor/Console` for support; neither contains keys or business
@@ -193,6 +197,39 @@ See [ANDROID_STARTUP_FIX.md](ANDROID_STARTUP_FIX.md) for the full investigation.
 Supporting an existing installation: **install the new APK over the old one.** Uninstalling or
 clearing app data destroys the only copy of the encrypted database and the Keystore key that
 decrypts it.
+
+### If the phone shows "Local storage needs attention"
+
+That screen is the application **refusing to guess**. Start-up needs an encrypted database it can
+prove it opened with the right key; when it cannot, it stops and says so instead of falling back to
+an unencrypted or in-memory store, and instead of recreating the file. Two facts are on the screen
+and both are needed by whoever fixes it:
+
+| On the screen                     | What it answers                                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------------------- |
+| `Diagnostic code: <stage>:<code>` | **What** failed — Keystore, passphrase store, plugin load, key/file mismatch, migration. |
+| `Build: <version> · <commit> · …` | **Which code** was running — the exact commit the APK was built from.                    |
+
+Work through it in this order:
+
+1. **Read the build line.** If it is missing, the installed APK is older than `0.3.0` (versionCode 3)
+   and predates the diagnostics entirely: install the current `MediMart-Android` artifact over the
+   top and look again. This is the single most common reason a report cannot be answered — two APKs
+   once shared `versionName 0.2.0` / `versionCode 2` while containing different start-up code.
+2. **Read the diagnostic code** and match it against `classifyDatabaseError` in
+   `apps/web/src/platform/diagnostics.ts`. `database:keystore-key-unusable` and
+   `database:keystore-key-unreadable` mean the device's Keystore cannot use the key that encrypts the
+   database; `database:database-key-mismatch` means the file and the stored key disagree;
+   `database:plugin-load-failed` means the SQLite plugin never finished loading.
+3. **Capture logcat with a computer** — `adb logcat -s MediMartStartup Capacitor/Console`. It holds
+   the native self-check result (`self-check ok` or `self-check failed keystore=… sqlcipher=…`), the
+   build identity and the redacted error. No key, no patient data, no business data.
+4. **Never** clear app data, never uninstall, never "just reinstall fresh" as a workaround. Each of
+   those destroys the only copy of the encrypted database and/or the key that decrypts it.
+
+CI asserts both identity channels on a real Android runtime (`scripts/android-emulator.sh` fails the
+run if the native version line or the bundle stamp is missing), so a build that cannot say what it is
+never reaches a phone.
 
 ## Native storage lifecycle
 

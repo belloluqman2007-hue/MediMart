@@ -188,6 +188,22 @@ if grep -qE "ERR_CLEARTEXT_NOT_PERMITTED|net::ERR_BLOCKED_BY" "$EVIDENCE/logcat.
 fi
 echo "Application launched and stayed in the foreground."
 
+step "Record which build is installed"
+# The first question after "the phone shows the storage failure" is *which APK is on it*. Two
+# artifacts once reported the same versionName/versionCode while containing different start-up
+# code, so both identity channels are asserted here:
+#   - native: StartupSelfCheck logs what the package manager installed (before any WebView), and
+#   - bundle: main.tsx logs the compiled stamp (version, commit, build time, profile).
+{
+  grep -E "versionCode=|versionName=" "$EVIDENCE/package.txt" | head -2 || true
+  grep -E "MediMartStartup.*environment" "$EVIDENCE/logcat.txt" | head -2 || true
+  grep -E "\[MediMart\] \[build\]" "$EVIDENCE/logcat.txt" | head -2 || true
+} | tee "$EVIDENCE/build-identity.txt"
+grep -q "MediMartStartup.*environment.*version=" "$EVIDENCE/logcat.txt" ||
+  fail "Installed APK version not reported" "The native self-check did not log version=<versionName>/<versionCode>; see build-identity.txt."
+grep -qE "\[MediMart\] \[build\] MediMart [0-9]" "$EVIDENCE/logcat.txt" ||
+  fail "Bundle build stamp missing" "The running bundle did not log its compiled build identity; see build-identity.txt."
+
 step "Verify the encrypted database initialized on first launch"
 check_database first-launch
 
