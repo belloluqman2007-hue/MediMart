@@ -65,6 +65,12 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
  * `database:keystore-key-unusable`). The code is shown because a shop owner reporting "the database
  * failed" cannot be helped, while the code names the cause without exposing any key or data. Nothing
  * here offers to delete, reset or re-create anything: the database and its key are the only copy.
+ *
+ * A second, longer line shows the redacted underlying message when one exists (the same text the
+ * logs carry). It is needed when the person holding the phone cannot produce `adb logcat`: the
+ * repair decision hinges on whether the Keystore failed to *generate* the master key or refused to
+ * *read* an existing one, and only the underlying message separates the two. The text comes from
+ * `diagnostics.ts`, which strips passphrase/secret-shaped material before anything is displayed.
  */
 export function StartupFailure({
   storage = false,
@@ -91,6 +97,12 @@ export function StartupFailure({
       {storage && info && (
         <p className="small muted">
           Diagnostic code: <code>{info.code}</code>
+        </p>
+      )}
+      {storage && info?.detail && (
+        <p className="small muted startup-failure-detail">
+          Details (redacted, no keys or patient data):{' '}
+          <code>{info.detail.replace(/^StartupError:\s*/, '')}</code>
         </p>
       )}
       {storage && (
