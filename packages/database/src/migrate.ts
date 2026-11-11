@@ -4,10 +4,18 @@ import { ledgerSql, migrations, type Migration } from './migrations';
 /** PRAGMA foreign_keys is a no-op inside a transaction, so migrations that rebuild a referenced table toggle it around the transaction. */
 const setForeignKeys = (database: Database, enabled: boolean) =>
   database.run(`PRAGMA foreign_keys = ${enabled ? 'ON' : 'OFF'}`);
+/** What a `migrate()` call did, so callers can log and verify it without re-querying. */
+export type MigrationOutcome = {
+  /** Migrations applied by this call (0 when the database was already current). */
+  applied: number;
+  /** Schema version after the call. */
+  version: number;
+};
+
 export async function migrate(
   database: Database,
   plan: readonly Migration[] = migrations,
-): Promise<void> {
+): Promise<MigrationOutcome> {
   if (plan.some((entry, index) => entry.version !== index + 1))
     throw new Error('Migrations must be contiguous and ordered from version 1.');
   const checksums = await Promise.all(
@@ -19,7 +27,7 @@ export async function migrate(
   const suspend = plan.slice(pending).some((migration) => migration.requiresForeignKeysOff);
   if (suspend) await setForeignKeys(database, false);
   try {
-    await runPlan(database, plan, checksums);
+    return await runPlan(database, plan, checksums);
   } finally {
     if (suspend) await setForeignKeys(database, true);
   }
@@ -41,8 +49,8 @@ async function runPlan(
   database: Database,
   plan: readonly Migration[],
   checksums: readonly string[],
-) {
-  await database.transaction(async (tx) => {
+): Promise<MigrationOutcome> {
+  return database.transaction(async (tx) => {
     await tx.run(ledgerSql);
     const applied = await tx.all<{ version: number; name: string; checksum: string }>(
       'SELECT version,name,checksum FROM database_migrations ORDER BY version',
@@ -71,5 +79,6 @@ async function runPlan(
     }
     const violations = await tx.all('PRAGMA foreign_key_check');
     if (violations.length) throw new Error('Database foreign-key validation failed.');
+    return { applied: plan.length - applied.length, version: plan.length };
   });
 }

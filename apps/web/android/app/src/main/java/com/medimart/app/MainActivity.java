@@ -34,6 +34,10 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Runs before Capacitor creates its WebView, so the cause of a storage failure is in logcat
+        // even when the JavaScript layer can only report "could not initialize its secure database".
+        // It cannot throw and cannot crash the application.
+        StartupSelfCheck.run(this);
         super.onCreate(savedInstanceState);
         getWindow().setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './fonts.css';
 import './styles.css';
 import { App, StartupFailure } from './App';
+import { describeStartupFailure, startupLog } from './platform/diagnostics';
 import { initializeRuntime } from './platform/runtime';
 const root = createRoot(document.getElementById('root')!);
 void initializeRuntime()
@@ -23,4 +24,11 @@ void initializeRuntime()
         /* Offline browser shell is optional; native startup does not depend on it. */
       });
   })
-  .catch(() => root.render(<StartupFailure storage />));
+  .catch((error: unknown) => {
+    const failure = describeStartupFailure(error);
+    startupLog.error('startup', 'MediMart could not start', {
+      code: failure.code,
+      detail: failure.detail,
+    });
+    root.render(<StartupFailure storage info={failure} />);
+  });

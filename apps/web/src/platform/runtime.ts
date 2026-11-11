@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { normalizeServerUrl, sha256 } from '@medimart/shared';
 import { readSetting, writeSetting } from '@medimart/database';
+import { StartupError, startupLog } from './diagnostics';
 import type { Runtime } from './types';
 export async function initializeRuntime(): Promise<Runtime> {
   if (!Capacitor.isNativePlatform()) {
@@ -25,8 +26,17 @@ export async function initializeRuntime(): Promise<Runtime> {
   }
   const { openNativeDatabase } = await import('./native-database');
   const { SecureStorage } = await import('@aparajita/capacitor-secure-storage');
-  await SecureStorage.setKeyPrefix('medimart_');
-  const db = await openNativeDatabase();
+  try {
+    await SecureStorage.setKeyPrefix('medimart_');
+  } catch (error) {
+    throw new StartupError(
+      'secure-storage',
+      'keystore-unavailable',
+      'Android Keystore-backed storage could not be opened.',
+      { cause: error },
+    );
+  }
+  const { db, outcome } = await openNativeDatabase();
   const deviceId = await db.transaction(async (tx) => {
     let id = await readSetting<string>(tx, 'installation_id', 'device', 'this-installation');
     if (!id) {
@@ -43,8 +53,14 @@ export async function initializeRuntime(): Promise<Runtime> {
         crypto.randomUUID(),
         id,
       ]);
+      startupLog.info('identity', 'Created this installation identifier');
     }
     return id;
+  });
+  startupLog.info('database', 'Installation identity ready', {
+    secretSource: outcome.secretSource,
+    connection: outcome.connection,
+    migratedOnThisLaunch: outcome.migrated,
   });
   let serverUrl = (await readSetting<string>(db, 'central_server_url', 'device', deviceId)) || '';
   const key = async (type: string) => `${type}_${await sha256(`${deviceId}:${serverUrl}`)}`;

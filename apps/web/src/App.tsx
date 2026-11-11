@@ -3,6 +3,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { HashRouter, Link, Route, Routes } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 import type { Runtime } from './platform/types';
+import type { StartupFailureInfo } from './platform/diagnostics';
 import { AppProvider } from './components/AppProvider';
 import { AppShell } from './components/AppShell';
 import { Brand, Button } from './components/ui';
@@ -57,7 +58,21 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
     return this.state.failed ? <StartupFailure /> : this.props.children;
   }
 }
-export function StartupFailure({ storage = false }: { storage?: boolean }) {
+/**
+ * First screen when startup cannot continue.
+ *
+ * `storage` failures come from the platform layer and carry a stable diagnostic code (for example
+ * `database:keystore-key-unusable`). The code is shown because a shop owner reporting "the database
+ * failed" cannot be helped, while the code names the cause without exposing any key or data. Nothing
+ * here offers to delete, reset or re-create anything: the database and its key are the only copy.
+ */
+export function StartupFailure({
+  storage = false,
+  info,
+}: {
+  storage?: boolean;
+  info?: StartupFailureInfo;
+}) {
   return (
     <div className="startup-failure">
       <div className="empty-icon">
@@ -73,10 +88,16 @@ export function StartupFailure({ storage = false }: { storage?: boolean }) {
         <RefreshCw size={16} />
         Try again
       </Button>
+      {storage && info && (
+        <p className="small muted">
+          Diagnostic code: <code>{info.code}</code>
+        </p>
+      )}
       {storage && (
         <p className="small muted">
-          If this continues, contact your administrator. An Android runtime or migration check may
-          be required.
+          If this continues, contact your administrator and give them the diagnostic code above. The
+          application has not deleted, reset or replaced your database, and it has not stored
+          anything unencrypted.
         </p>
       )}
     </div>
