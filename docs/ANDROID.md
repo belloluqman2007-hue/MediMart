@@ -172,6 +172,28 @@ When the phone cannot reach the shop computer (Wi-Fi dropped, computer asleep, r
 
 ---
 
+## What start-up does, and what happens when it fails
+
+See [ANDROID_STARTUP_FIX.md](ANDROID_STARTUP_FIX.md) for the full investigation. In short:
+
+1. Before the WebView exists, `StartupSelfCheck` writes the device/WebView versions and proves the
+   Android Keystore can generate and use an AES-256/GCM key, and that the SQLCipher library loads
+   (logcat tag **`MediMartStartup`**). It never logs a key and cannot crash the application.
+2. The app then generates a 256-bit passphrase on first launch, or reuses the stored one on every
+   later launch, and **reads it back** before the first write. A key that cannot be read back is
+   reported, never replaced.
+3. The encrypted database is opened, foreign-key enforcement is read back and migrations run; the
+   app logs `[MediMart] [database] Encrypted database ready` with the schema version.
+4. If anything in that chain fails, the failure screen shows a **diagnostic code** such as
+   `database:keystore-key-unusable` or `database:database-key-mismatch` and says explicitly that
+   nothing was deleted, recreated or stored unencrypted. Collect the code plus
+   `adb logcat -s MediMartStartup Capacitor/Console` for support; neither contains keys or business
+   data.
+
+Supporting an existing installation: **install the new APK over the old one.** Uninstalling or
+clearing app data destroys the only copy of the encrypted database and the Keystore key that
+decrypts it.
+
 ## Native storage lifecycle
 
 1. Load the SQLite and secure-storage plugins only in a native runtime.
