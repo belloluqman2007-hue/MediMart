@@ -134,6 +134,16 @@ export const operationSchema = z
         'backup_records',
         'backup_setting',
         'backup_settings',
+        /*
+         * Phase 8 keeps clinical corrections and import bookkeeping off the business outbox too.
+         * An addendum is a clinical record that must be authorized by a professional online, and an
+         * import run is a bulk administrative action — neither is safe to capture on a phone and
+         * replay later.
+         */
+        'clinical_addendum',
+        'clinical_addenda',
+        'product_import_run',
+        'product_import_runs',
       ].includes(op.entityType)
     ) {
       ctx.addIssue({

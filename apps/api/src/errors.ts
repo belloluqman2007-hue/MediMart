@@ -46,12 +46,28 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, req, res, _nex
     });
     return;
   }
-  // Log only classification and correlation, never submitted bodies, secrets, SQL, or hashes.
+  /**
+   * Log only classification and correlation, never submitted bodies, secrets, SQL, or hashes.
+   *
+   * A SQLite message tells an operator which rule refused a write without printing the statement
+   * or any row value; without it, `INTERNAL_ERROR` is untraceable in a shop with no log viewer.
+   */
+  /**
+   * The SQLite error message is included when it is a constraint/vocabulary failure, because those
+   * messages name a rule ("CHECK constraint failed: ..."), never a row value or a statement. Without
+   * it an operator sees only `INTERNAL_ERROR` and cannot tell a validation gap from a real fault.
+   * Everything else stays classified only.
+   */
+  const detail =
+    error instanceof Error && error.name === 'SqliteError' && error.message.length <= 200
+      ? error.message
+      : undefined;
   console.error(
     JSON.stringify({
       level: 'error',
       requestId: req.requestId,
       kind: error instanceof Error ? error.name : 'UnknownError',
+      ...(detail ? { detail } : {}),
     }),
   );
   res.status(500).json({

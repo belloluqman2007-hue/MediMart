@@ -18,6 +18,9 @@ export type ProductRow = {
   sku: string | null;
   barcode: string | null;
   product_type: ProductSummary['productType'];
+  dosage_form: ProductSummary['dosageForm'];
+  strength: string | null;
+  pack_size: number | null;
   category_id: string | null;
   category_name: string | null;
   description: string | null;
@@ -96,6 +99,9 @@ export function mapProduct(row: ProductRow): ProductSummary {
     sku: row.sku,
     barcode: row.barcode,
     productType: row.product_type,
+    dosageForm: row.dosage_form,
+    strength: row.strength,
+    packSize: row.pack_size === null ? null : Number(row.pack_size),
     categoryId: row.category_id,
     categoryName: row.category_name,
     purchaseCostKobo: Number(row.purchase_cost_kobo),

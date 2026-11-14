@@ -7,6 +7,7 @@ import {
   fefoQuerySchema,
   inventorySettingsSchema,
   movementListQuerySchema,
+  productImportRequestSchema,
   productInputSchema,
   productListQuerySchema,
   stockAdjustmentSchema,
@@ -17,6 +18,7 @@ import {
   uuidSchema,
 } from '@medimart/shared';
 import { requireAuth, requirePermission } from '../middleware/security';
+import { audit } from '../services/audit';
 import type { AuthService } from '../services/auth';
 import {
   createProduct,
@@ -52,6 +54,7 @@ import {
   saveInventorySettings,
 } from '../services/inventory/stock';
 import { inventoryDashboard } from '../services/inventory/dashboard';
+import { importProducts, listImportRuns, rebuildSearchText } from '../services/inventory/import';
 
 const meta = (req: Parameters<RequestHandler>[0]) => ({
   auth: req.auth!,
@@ -125,6 +128,42 @@ export function registerInventoryRoutes(app: Express, db: Database, auth: AuthSe
       },
     );
   }
+  /**
+   * Bulk catalogue onboarding. A preview and a real import share one evaluation, so the shopkeeper
+   * sees exactly what will happen before anything is written.
+   */
+  app.post('/api/products/import', ...guard('products.import'), async (req, res) => {
+    const input = productImportRequestSchema.parse(req.body);
+    const { auth: context, requestId } = meta(req);
+    res.json(await importProducts(db, context, requestId, input));
+  });
+  app.get('/api/products/import/runs', ...guard('products.import'), async (_req, res) => {
+    res.json({ runs: await listImportRuns(db) });
+  });
+  /**
+   * Rebuild the derived search column. Safe and idempotent: it writes only `search_text`, never a
+   * business field, so it can be run after a restore or by an administrator investigating search.
+   */
+  app.post(
+    '/api/products/search-index/rebuild',
+    ...guard('inventory.settings.manage'),
+    async (req, res) => {
+      const { auth: context, requestId } = meta(req);
+      res.json(
+        await db.transaction(async (tx) => {
+          const count = await rebuildSearchText(tx);
+          await audit(tx, {
+            action: 'product.search_index_rebuilt',
+            actorId: context.user.id,
+            deviceId: context.deviceId,
+            requestId,
+            metadata: { products: count },
+          });
+          return { products: count };
+        }),
+      );
+    },
+  );
   app.get('/api/products/:id/batches', ...guard('batches.view'), async (req, res) => {
     res.json({
       batches: (

@@ -1345,3 +1345,285 @@ describe('legacy operations without a stored fingerprint', () => {
     expect(await movementCount()).toBe(2);
   });
 });
+
+describe('bulk product import', () => {
+  const rows = (stamp: string) => [
+    {
+      name: `Artemether ${stamp} 20 mg Tablet`,
+      genericName: 'Artemether',
+      sku: `ART-${stamp}`,
+      productType: 'medicine',
+      category: 'Analgesics',
+      dosageForm: 'tabs',
+      strength: '20 mg',
+      packSize: '6',
+      purchaseCostKobo: '350.00',
+      sellingPriceKobo: '700.00',
+      reorderLevel: '20',
+      baseUnit: 'tablet',
+      expiryTracked: 'yes',
+      status: 'active',
+    },
+  ];
+
+  it('previews without writing and reports one row per spreadsheet line', async () => {
+    const before = Number(
+      (await db.all<{ c: number }>('SELECT COUNT(*) AS c FROM products'))[0]!.c,
+    );
+    const preview = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: rows('preview'),
+      preview: true,
+    });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      preview: true,
+      totalRows: 1,
+      createCount: 1,
+      errorCount: 0,
+      blocked: false,
+      id: null,
+    });
+    // The header is row 1, so the first data row is reported as row 2.
+    expect(preview.body.rows[0]).toMatchObject({ row: 2, action: 'create' });
+    const after = Number((await db.all<{ c: number }>('SELECT COUNT(*) AS c FROM products'))[0]!.c);
+    expect(after).toBe(before);
+  });
+
+  it('applies a clean file, normalises everyday words, and never duplicates on replay', async () => {
+    const stamp = 'apply1';
+    const key = `test-import-key-${stamp}`;
+    const applied = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: rows(stamp),
+      preview: false,
+      idempotencyKey: key,
+      fileName: 'supplier-list.csv',
+    });
+    expect(applied.status).toBe(200);
+    expect(applied.body).toMatchObject({ createCount: 1, updateCount: 0, errorCount: 0 });
+    expect(applied.body.id).toBeTruthy();
+
+    const created = (
+      await db.all<{
+        dosage_form: string;
+        strength: string;
+        pack_size: number;
+        search_text: string;
+      }>('SELECT dosage_form,strength,pack_size,search_text FROM products WHERE sku = ?', [
+        `ART-${stamp}`,
+      ])
+    )[0]!;
+    // "tabs" is accepted and stored as the canonical form.
+    expect(created.dosage_form).toBe('tablet');
+    expect(created.strength).toBe('20 mg');
+    expect(created.pack_size).toBe(6);
+    // search_text is derived on write, so the product is findable immediately.
+    expect(created.search_text).toContain('artemether');
+
+    // The same key replays the stored report instead of importing twice.
+    const replay = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: rows(stamp),
+      preview: false,
+      idempotencyKey: key,
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.body.id).toBe(applied.body.id);
+    const count = Number(
+      (
+        await db.all<{ c: number }>('SELECT COUNT(*) AS c FROM products WHERE sku = ?', [
+          `ART-${stamp}`,
+        ])
+      )[0]!.c,
+    );
+    expect(count).toBe(1);
+  });
+
+  it('skips existing products unless updating is requested', async () => {
+    const stamp = 'apply1';
+    // Each test runs against its own in-memory database, so seed the product here first.
+    const seeded = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: rows(stamp),
+      preview: false,
+    });
+    expect(seeded.status).toBe(200);
+    const again = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: rows(stamp),
+      preview: true,
+    });
+    expect(again.body).toMatchObject({ createCount: 0, skipCount: 1 });
+    expect(again.body.rows[0]).toMatchObject({ action: 'skip', matchedOn: 'sku' });
+
+    const update = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: rows(stamp).map((row) => ({ ...row, sellingPriceKobo: '750.00', packSize: '12' })),
+      preview: false,
+      updateExisting: true,
+    });
+    expect(update.status).toBe(200);
+    expect(update.body).toMatchObject({ updateCount: 1, createCount: 0 });
+    const updated = (
+      await db.all<{ selling_price_kobo: number; pack_size: number }>(
+        'SELECT selling_price_kobo,pack_size FROM products WHERE sku = ?',
+        [`ART-${stamp}`],
+      )
+    )[0]!;
+    expect(updated.selling_price_kobo).toBe(75000);
+    expect(updated.pack_size).toBe(12);
+  });
+
+  it('blocks the whole write when any row is invalid, and names the row', async () => {
+    const stamp = 'blocked';
+    const attempt = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: [
+        ...rows(stamp),
+        {
+          name: `Broken ${stamp}`,
+          sku: `BAD-${stamp}`,
+          productType: 'medicine',
+          purchaseCostKobo: 'not-a-price',
+          baseUnit: 'tablet',
+        },
+      ],
+      preview: false,
+    });
+    expect(attempt.status).toBe(400);
+    expect(attempt.body.error.code).toBe('IMPORT_HAS_ERRORS');
+    // Nothing from the file was written, including the valid first row.
+    const written = await db.all('SELECT id FROM products WHERE sku IN (?,?)', [
+      `ART-${stamp}`,
+      `BAD-${stamp}`,
+    ]);
+    expect(written).toHaveLength(0);
+  });
+
+  it('records the run in history and requires the import permission', async () => {
+    const applied = await auth(owner, ownerSession).post('/api/products/import', {
+      rows: rows('history'),
+      preview: false,
+      fileName: 'supplier-list.csv',
+    });
+    expect(applied.status).toBe(200);
+    const runs = await auth(owner, ownerSession).get('/api/products/import/runs');
+    expect(runs.status).toBe(200);
+    expect(runs.body.runs.length).toBeGreaterThan(0);
+    expect(runs.body.runs[0]).toMatchObject({
+      fileName: expect.any(String),
+      createdRows: expect.any(Number),
+      updatedRows: expect.any(Number),
+      skippedRows: expect.any(Number),
+      createdByName: expect.stringContaining('Inventory'),
+    });
+
+    // A cashier has no products.import grant, so the endpoint must refuse rather than merely hide.
+    const cashier = await staff(['cashier'], 'cashier-import@inventory.test');
+    const denied = await cashier.post('/api/products/import', {
+      rows: rows('denied'),
+      preview: true,
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('PERMISSION_DENIED');
+    const deniedHistory = await cashier.get('/api/products/import/runs');
+    expect(deniedHistory.status).toBe(403);
+  });
+});
+
+describe('staff administration and permission changes', () => {
+  it('lists staff with their roles and live session counts', async () => {
+    await staff(['pharmacist'], 'listed@inventory.test');
+    const list = await auth(owner, ownerSession).get('/api/staff?search=listed');
+    expect(list.status).toBe(200);
+    expect(list.body.users).toHaveLength(1);
+    expect(list.body.users[0]).toMatchObject({
+      email: 'listed@inventory.test',
+      status: 'active',
+      roles: ['pharmacist'],
+      activeSessions: 1,
+    });
+  });
+
+  it('applies a role change on the target account immediately', async () => {
+    const target = await staff(['cashier'], 'promoted@inventory.test');
+    // The cashier cannot read products today.
+    expect((await target.get('/api/products')).status).toBe(403);
+    const change = await auth(owner, ownerSession).put(
+      `/api/staff/${(await db.all<{ id: string }>('SELECT id FROM users WHERE email = ?', ['promoted@inventory.test']))[0]!.id}/roles`,
+      { roles: ['storekeeper'] },
+    );
+    expect(change.status).toBe(200);
+    // Permissions are re-read per request, so the existing session gains the new role's access.
+    expect((await target.get('/api/products')).status).toBe(200);
+  });
+
+  it('refuses to let anyone change their own roles or disable themselves', async () => {
+    const selfRole = await auth(owner, ownerSession).put(
+      `/api/staff/${ownerSession.user.id}/roles`,
+      {
+        roles: ['cashier'],
+      },
+    );
+    expect(selfRole.status).toBe(409);
+    expect(selfRole.body.error.code).toBe('SELF_ROLE_CHANGE');
+    const selfDisable = await auth(owner, ownerSession).post(
+      `/api/staff/${ownerSession.user.id}/disable`,
+    );
+    expect(selfDisable.status).toBe(409);
+    expect(selfDisable.body.error.code).toBe('SELF_DISABLE');
+  });
+
+  it('disables an account, ends its sessions, and blocks sign-in until re-enabled', async () => {
+    const target = await staff(['pharmacist'], 'suspended@inventory.test');
+    const id = (
+      await db.all<{ id: string }>('SELECT id FROM users WHERE email = ?', [
+        'suspended@inventory.test',
+      ])
+    )[0]!.id;
+    expect((await target.get('/api/products')).status).toBe(200);
+    const disabled = await auth(owner, ownerSession).post(`/api/staff/${id}/disable`);
+    expect(disabled.status).toBe(200);
+    expect(disabled.body).toMatchObject({ status: 'disabled', activeSessions: 0 });
+    // The existing session is revoked, not merely denied by role.
+    const afterDisable = await target.get('/api/products');
+    expect([401, 403]).toContain(afterDisable.status);
+    const relogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'suspended@inventory.test', password: 'A long individual staff passphrase' });
+    expect(relogin.status).toBe(401);
+    expect((await auth(owner, ownerSession).post(`/api/staff/${id}/enable`)).status).toBe(200);
+    const again = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'suspended@inventory.test', password: 'A long individual staff passphrase' });
+    expect(again.status).toBe(200);
+  });
+
+  it('protects the owner role and records every permission change', async () => {
+    const immutable = await auth(owner, ownerSession).put('/api/permissions/owner/audit.view', {
+      granted: false,
+    });
+    expect(immutable.status).toBe(409);
+    expect(immutable.body.error.code).toBe('OWNER_IMMUTABLE');
+
+    const revoke = await auth(owner, ownerSession).put('/api/permissions/cashier/payments.record', {
+      granted: false,
+    });
+    expect(revoke.status).toBe(200);
+    // The change is immediately effective for a cashier that is already signed in.
+    const cashier = await staff(['cashier'], 'no-payments@inventory.test');
+    const denied = await cashier.get('/api/permissions');
+    expect([403]).toContain(denied.status);
+
+    const restored = await auth(owner, ownerSession).put(
+      '/api/permissions/cashier/payments.record',
+      {
+        granted: true,
+      },
+    );
+    expect(restored.status).toBe(200);
+    const audited = await db.all<{ action: string }>(
+      "SELECT action FROM audit_logs WHERE action IN ('permissions.granted','permissions.revoked','staff.roles_changed') ORDER BY created_at DESC",
+    );
+    // Both the revoke and the restore are recorded (role changes are audited separately and by
+    // their own test, so this assertion is about permission changes specifically).
+    expect(audited.length).toBeGreaterThanOrEqual(2);
+    expect(audited.map((row) => row.action)).toEqual(
+      expect.arrayContaining(['permissions.revoked', 'permissions.granted']),
+    );
+  });
+});

@@ -4,6 +4,8 @@ import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react';
 import {
   hasPermission,
   productInputSchema,
+  dosageFormLabels,
+  dosageForms,
   productTypeLabels,
   productTypes,
   type CategorySummary,
@@ -24,6 +26,10 @@ type FormState = {
   sku: string;
   barcode: string;
   productType: string;
+  /** Pharmacy identity: does not apply to groceries, so it is cleared when the type changes. */
+  dosageForm: string;
+  strength: string;
+  packSize: string;
   categoryId: string;
   description: string;
   manufacturer: string;
@@ -42,6 +48,9 @@ const emptyState: FormState = {
   sku: '',
   barcode: '',
   productType: 'medicine',
+  dosageForm: '',
+  strength: '',
+  packSize: '',
   categoryId: '',
   description: '',
   manufacturer: '',
@@ -61,6 +70,9 @@ function toForm(product: ProductDetail): FormState {
     sku: product.sku ?? '',
     barcode: product.barcode ?? '',
     productType: product.productType,
+    dosageForm: product.dosageForm ?? '',
+    strength: product.strength ?? '',
+    packSize: product.packSize === null ? '' : String(product.packSize),
     categoryId: product.categoryId ?? '',
     description: product.description ?? '',
     manufacturer: product.manufacturer ?? '',
@@ -171,6 +183,9 @@ function ProductForm({
       sku: form.sku,
       barcode: form.barcode,
       productType: form.productType,
+      dosageForm: form.dosageForm,
+      strength: form.strength,
+      packSize: form.packSize === '' ? null : Number(form.packSize),
       categoryId: form.categoryId,
       description: form.description,
       manufacturer: form.manufacturer,
@@ -307,6 +322,10 @@ function ProductForm({
                     ...current,
                     productType,
                     isExpiryTracked: productType === 'medicine' ? true : current.isExpiryTracked,
+                    // Pharmacy fields only mean something for medicines; clear them otherwise.
+                    ...(productType === 'medicine'
+                      ? {}
+                      : { dosageForm: '', strength: '', packSize: '' }),
                   }));
                 }}
               >
@@ -316,6 +335,52 @@ function ProductForm({
                   </option>
                 ))}
               </select>
+            </Field>
+            <Field
+              label="Dosage form"
+              hint="How the medicine is presented. Leave blank for non-medicines."
+              error={fieldErrors.dosageForm?.[0]}
+            >
+              <select
+                value={form.dosageForm}
+                onChange={(event) => update('dosageForm', event.target.value)}
+                disabled={form.productType !== 'medicine'}
+              >
+                <option value="">Not applicable</option>
+                {dosageForms.map((form_) => (
+                  <option key={form_} value={form_}>
+                    {dosageFormLabels[form_]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label="Strength"
+              hint="The dose per unit, e.g. 500 mg or 250 mg/5 ml."
+              error={fieldErrors.strength?.[0]}
+            >
+              <input
+                value={form.strength}
+                maxLength={60}
+                placeholder="500 mg"
+                disabled={form.productType !== 'medicine'}
+                onChange={(event) => update('strength', event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Pack size"
+              hint="Units per pack, if you sell sealed packs. Used for barcode labels."
+              error={fieldErrors.packSize?.[0]}
+            >
+              <input
+                type="number"
+                min={1}
+                max={100000}
+                value={form.packSize}
+                placeholder="e.g. 10"
+                disabled={form.productType !== 'medicine'}
+                onChange={(event) => update('packSize', event.target.value)}
+              />
             </Field>
             <Field label="Category">
               <select

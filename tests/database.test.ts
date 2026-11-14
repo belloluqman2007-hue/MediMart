@@ -57,6 +57,8 @@ describe('SQLite schema and migrations', () => {
       'backup_records',
       'backup_settings',
       'categories',
+      // Phase 8 additions: append-only clinical corrections and bulk-import bookkeeping.
+      'clinical_addenda',
       'consultations',
       'customer_debts',
       'customers',
@@ -77,6 +79,7 @@ describe('SQLite schema and migrations', () => {
       'prescription_items',
       'prescriptions',
       'product_batches',
+      'product_import_runs',
       'product_units',
       'products',
       'purchase_order_items',
@@ -285,7 +288,8 @@ describe('durable outbox and synchronization primitives (no sync engine)', () =>
     const internalTables = await db.all<{ name: string }>(
       "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     );
-    expect(internalTables).toHaveLength(52);
+    // 52 released tables plus the two Phase 8 additions (clinical_addenda, product_import_runs).
+    expect(internalTables).toHaveLength(54);
     for (const { name: entityType } of internalTables) {
       expect(operationSchema.safeParse(op({ entityType })).success, entityType).toBe(false);
     }

@@ -10,12 +10,18 @@ import { Brand, Button } from './components/ui';
 import { Dashboard } from './features/Dashboard';
 import { AuthPage } from './features/AuthPage';
 import { PlaceholderPage } from './features/PlaceholderPage';
+import { PharmacyPage } from './features/pharmacy/PharmacyPage';
+import { MiniMartPage } from './features/pharmacy/MiniMartPage';
+import { StaffPage } from './features/administration/StaffPage';
+import { PermissionsPage } from './features/administration/PermissionsPage';
+import { AuditLogsPage } from './features/administration/AuditLogsPage';
 import { BackupSyncPage } from './features/BackupSyncPage';
 import { SettingsPage } from './features/SettingsPage';
 import { InventoryLayout } from './features/inventory/InventoryLayout';
 import { InventoryDashboard } from './features/inventory/InventoryDashboard';
 import { ProductsPage } from './features/inventory/ProductsPage';
 import { ProductFormPage } from './features/inventory/ProductFormPage';
+import { ProductImportPage } from './features/inventory/ProductImportPage';
 import { ProductDetailPage } from './features/inventory/ProductDetailPage';
 import { CategoriesPage } from './features/inventory/CategoriesPage';
 import { BatchesPage } from './features/inventory/BatchesPage';
@@ -143,6 +149,7 @@ export function App({ runtime }: { runtime: Runtime }) {
                 <Route index element={<InventoryDashboard />} />
                 <Route path="products" element={<ProductsPage />} />
                 <Route path="products/new" element={<ProductFormPage />} />
+                <Route path="products/import" element={<ProductImportPage />} />
                 <Route path="products/:id" element={<ProductDetailPage />} />
                 <Route path="products/:id/edit" element={<ProductFormPage />} />
                 <Route path="categories" element={<CategoriesPage />} />
@@ -190,6 +197,11 @@ export function App({ runtime }: { runtime: Runtime }) {
               <Route path="debts" element={<DebtsPage />} />
               <Route path="reports" element={<ReportsPage />} />
               <Route path="backup-sync" element={<BackupSyncPage />} />
+              <Route path="pharmacy" element={<PharmacyPage />} />
+              <Route path="mini-mart" element={<MiniMartPage />} />
+              <Route path="staff" element={<StaffPage />} />
+              <Route path="permissions" element={<PermissionsPage />} />
+              <Route path="audit-logs" element={<AuditLogsPage />} />
               {[
                 'patients',
                 'patients/new',
@@ -227,6 +239,11 @@ export function App({ runtime }: { runtime: Runtime }) {
                       '/dispensing',
                       '/patient-reports',
                       '/backup-sync',
+                      '/pharmacy',
+                      '/mini-mart',
+                      '/staff',
+                      '/permissions',
+                      '/audit-logs',
                     ].includes(item.path),
                 )
                 .map((item) => (
