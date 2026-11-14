@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Paginated, ProductSummary } from '@medimart/shared';
+import type { Paginated, ProductImportRowInput, ProductSummary } from '@medimart/shared';
 import { errorMessage } from '../../lib/api';
 import { useApp } from '../../lib/context';
 
@@ -130,4 +130,99 @@ export function addDaysIso(days: number) {
   const value = new Date();
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
+}
+
+/**
+ * A deliberately small RFC-4180 CSV reader: quoted fields, escaped quotes, embedded newlines and
+ * CRLF. It reports problems per row instead of throwing, so a stray quote on line 400 does not hide
+ * the other 399 rows.
+ */
+export function parseCsv(text: string): { rows: ProductImportRowInput[]; errors: string[] } {
+  const records: string[][] = [];
+  const errors: string[] = [];
+  let field = '';
+  let record: string[] = [];
+  let quoted = false;
+  let line = 1;
+  let recordLine = 1;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (quoted) {
+      if (char === '"') {
+        if (text[index + 1] === '"') {
+          field += '"';
+          index += 1;
+        } else quoted = false;
+      } else {
+        if (char === '\n') line += 1;
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === ',') {
+      record.push(field);
+      field = '';
+      continue;
+    }
+    if (char === '\r') continue;
+    if (char === '\n') {
+      record.push(field);
+      records.push(record);
+      record = [];
+      field = '';
+      line += 1;
+      recordLine = line;
+      continue;
+    }
+    field += char;
+  }
+  if (quoted) errors.push(`A quoted value starting near line ${recordLine} never closes.`);
+  if (field.length > 0 || record.length > 0) {
+    record.push(field);
+    records.push(record);
+  }
+
+  const nonEmpty = records.filter((cells) => cells.some((cell) => cell.trim() !== ''));
+  const header = nonEmpty.shift();
+  if (!header) return { rows: [], errors: [...errors, 'The file is empty.'] };
+
+  const columns = header.map((cell) => cell.trim().replace(/^\ufeff/, ''));
+  const nameIndex = columns.findIndex((column) => column.toLowerCase() === 'name');
+  if (nameIndex === -1)
+    return { rows: [], errors: [...errors, 'The header row must contain a "name" column.'] };
+
+  const rows: ProductImportRowInput[] = nonEmpty.map((cells) => {
+    const value = (key: string) => {
+      const at = columns.findIndex((column) => column.toLowerCase() === key.toLowerCase());
+      return at === -1 ? '' : (cells[at] ?? '').trim();
+    };
+    const packSize = value('packSize');
+    const row: ProductImportRowInput = {
+      name: cells[nameIndex]?.trim() ?? '',
+      genericName: value('genericName') || undefined,
+      brand: value('brand') || undefined,
+      sku: value('sku') || undefined,
+      barcode: value('barcode') || undefined,
+      productType: value('productType') || undefined,
+      category: value('category') || undefined,
+      dosageForm: value('dosageForm') || undefined,
+      strength: value('strength') || undefined,
+      ...(packSize ? { packSize } : {}),
+      manufacturer: value('manufacturer') || undefined,
+      purchaseCostKobo: value('purchaseCostKobo') || undefined,
+      sellingPriceKobo: value('sellingPriceKobo') || undefined,
+      reorderLevel: value('reorderLevel') || undefined,
+      baseUnit: value('baseUnit') || undefined,
+      expiryTracked: value('expiryTracked') || undefined,
+      status: value('status') || undefined,
+    };
+    return row;
+  });
+
+  return { rows, errors };
 }

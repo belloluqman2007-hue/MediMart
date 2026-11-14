@@ -13,6 +13,9 @@ import {
   loginSchema,
   ownerRegistrationSchema,
   pairingStatusSchema,
+  passwordSchema,
+  permissions,
+  roleCodes,
   registerDeviceSchema,
   staffRegistrationSchema,
   uuidSchema,
@@ -21,6 +24,13 @@ import type { ApiConfig } from './config';
 import { ApiError, errorHandler } from './errors';
 import { cookieName, originGuard, requireAuth, requirePermission } from './middleware/security';
 import { AuthService, requireActiveContext } from './services/auth';
+import {
+  listStaff,
+  resetStaffPassword,
+  setRolePermission,
+  setStaffStatus,
+  updateStaffRoles,
+} from './services/staff';
 import { DeviceService } from './services/devices';
 import { csrfForToken } from './services/crypto';
 import { audit } from './services/audit';
@@ -189,13 +199,68 @@ export function createApp(
       });
     },
   );
-  app.get('/api/staff', authenticated, requirePermission('staff.view'), async (_req, res) => {
-    res.json({
-      users: await db.all(
-        'SELECT id,full_name,email,status,created_at FROM users WHERE deleted_at IS NULL ORDER BY full_name LIMIT 100',
-      ),
-    });
+  app.get('/api/staff', authenticated, requirePermission('staff.view'), async (req, res) => {
+    const query = z
+      .strictObject({ search: z.string().trim().max(120).optional() })
+      .parse(req.query);
+    res.json({ users: await listStaff(db, { search: query.search || undefined }) });
   });
+  app.put(
+    '/api/staff/:id/roles',
+    authenticated,
+    requirePermission('staff.manage'),
+    async (req, res) => {
+      // Role escalation and the last-owner rule are rechecked inside the write transaction.
+      const { roles } = z
+        .strictObject({ roles: z.array(z.enum(roleCodes)).min(1).max(7) })
+        .parse(req.body);
+      res.json(
+        await updateStaffRoles(
+          db,
+          req.auth!,
+          req.requestId,
+          uuidSchema.parse(req.params.id),
+          roles,
+        ),
+      );
+    },
+  );
+  for (const status of ['active', 'disabled'] as const) {
+    app.post(
+      `/api/staff/:id/${status === 'active' ? 'enable' : 'disable'}`,
+      authenticated,
+      requirePermission('staff.deactivate'),
+      async (req, res) => {
+        z.strictObject({}).parse(req.body ?? {});
+        res.json(
+          await setStaffStatus(
+            db,
+            req.auth!,
+            req.requestId,
+            uuidSchema.parse(req.params.id),
+            status,
+          ),
+        );
+      },
+    );
+  }
+  app.post(
+    '/api/staff/:id/reset-password',
+    authenticated,
+    requirePermission('staff.reset_password'),
+    authLimiter,
+    async (req, res) => {
+      const { newPassword } = z.strictObject({ newPassword: passwordSchema }).parse(req.body);
+      await resetStaffPassword(
+        db,
+        req.auth!,
+        req.requestId,
+        uuidSchema.parse(req.params.id),
+        newPassword,
+      );
+      res.status(204).end();
+    },
+  );
   app.get(
     '/api/permissions',
     authenticated,
@@ -206,7 +271,20 @@ export function createApp(
         grants: await db.all(
           'SELECT r.code AS role,p.code AS permission FROM role_permissions rp JOIN roles r ON r.id=rp.role_id JOIN permissions p ON p.id=rp.permission_id ORDER BY r.code,p.code',
         ),
+        /** The full catalogue with descriptions, so the Permissions screen can explain each grant. */
+        catalogue: await db.all('SELECT code,description FROM permissions ORDER BY code'),
       });
+    },
+  );
+  app.put(
+    '/api/permissions/:role/:permission',
+    authenticated,
+    requirePermission('permissions.manage'),
+    async (req, res) => {
+      const role = z.enum(roleCodes).parse(req.params.role);
+      const permission = z.enum(permissions).parse(req.params.permission);
+      const { granted } = z.strictObject({ granted: z.boolean() }).parse(req.body);
+      res.json(await setRolePermission(db, req.auth!, req.requestId, role, permission, granted));
     },
   );
   app.post('/api/devices/register', pairingLimiter, async (req, res) => {

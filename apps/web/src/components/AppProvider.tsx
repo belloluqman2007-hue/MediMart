@@ -38,14 +38,17 @@ export function AppProvider({ runtime, children }: { runtime: Runtime; children:
   const [toast, setToast] = useState<{
     message: string;
     tone: 'success' | 'error' | 'info';
+    /** Stable identity so re-showing the same message restarts its timer instead of being ignored. */
+    id: number;
   } | null>(null);
   // Prevent a stale background session check from undoing a newer login/logout/server change.
   const epoch = useRef(0);
   const authBusy = useRef(false);
-  const notify = useCallback<AppContextValue['notify']>(
-    (message, tone = 'info') => setToast({ message, tone }),
-    [],
-  );
+  const toastSeq = useRef(0);
+  const notify = useCallback<AppContextValue['notify']>((message, tone = 'info') => {
+    toastSeq.current += 1;
+    setToast({ message, tone, id: toastSeq.current });
+  }, []);
   const acceptSession = useCallback(
     (value: SessionResponse | null) => {
       api.setSession(value);
@@ -135,7 +138,11 @@ export function AppProvider({ runtime, children }: { runtime: Runtime; children:
   }, [acceptSession, notify, session]);
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 6500);
+    /*
+     * Dismiss on its own so a confirmation cannot sit on top of the page indefinitely. The timer is
+     * keyed to the toast identity, not merely to the object, so a repeated message still expires.
+     */
+    const timer = setTimeout(() => setToast(null), toast.tone === 'error' ? 9000 : 4500);
     return () => clearTimeout(timer);
   }, [toast]);
   /**
@@ -260,6 +267,7 @@ export function AppProvider({ runtime, children }: { runtime: Runtime; children:
       {children}
       {toast && (
         <div
+          key={toast.id}
           className={`toast toast-${toast.tone}`}
           role={toast.tone === 'error' ? 'alert' : 'status'}
         >

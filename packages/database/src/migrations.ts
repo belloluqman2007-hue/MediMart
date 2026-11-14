@@ -3,6 +3,7 @@ import { healthcareMigrations } from './migrations-healthcare';
 import { inventoryMigrations } from './migrations-inventory';
 import { deviceMigrations } from './migrations-device';
 import { offlineMigrations } from './migrations-offline';
+import { phase8Migrations } from './migrations-phase8';
 import { salesMigrations } from './migrations-sales';
 import { timestamp, uuid } from './schema-helpers';
 import { permissions, roleCodes, roleLabels, rolePermissions } from './seed-v1';
@@ -181,4 +182,5 @@ export const migrations: readonly Migration[] = [
   ...financeMigrations,
   ...offlineMigrations,
   ...deviceMigrations,
+  ...phase8Migrations,
 ];

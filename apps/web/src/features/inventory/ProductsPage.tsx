@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Boxes, PackagePlus, Plus } from 'lucide-react';
+import { Boxes, PackagePlus, Plus, Upload } from 'lucide-react';
 import {
   hasPermission,
   productTypeLabels,
@@ -35,6 +35,7 @@ export function ProductsPage() {
   const [page, setPage] = useState(Number(params.get('page') ?? 1));
   const canCreate = Boolean(user && hasPermission(user.permissions, 'products.create'));
   const canReceive = Boolean(user && hasPermission(user.permissions, 'stock.receive'));
+  const canImport = Boolean(user && hasPermission(user.permissions, 'products.import'));
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(search), 300);
@@ -108,6 +109,11 @@ export function ProductsPage() {
             {canReceive && (
               <Link to="/inventory/receive" className="button button-secondary">
                 <PackagePlus size={16} /> Receive stock
+              </Link>
+            )}
+            {canImport && (
+              <Link to="/inventory/products/import" className="button button-secondary">
+                <Upload size={16} /> Import
               </Link>
             )}
             {canCreate && (

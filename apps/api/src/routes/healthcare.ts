@@ -2,6 +2,7 @@ import type { Express, Request } from 'express';
 import { z } from 'zod';
 import type { Database, SqlExecutor, SqlRow } from '@medimart/database';
 import {
+  clinicalAddendumSchema,
   patientSchema,
   consultationSchema,
   vitalsSchema,
@@ -214,6 +215,164 @@ export function registerHealthcareRoutes(app: Express, db: Database, auth: AuthS
       },
     );
   }
+  /**
+   * Append-only clinical corrections. A saved note is never rewritten: a correction is a new,
+   * attributed, dated entry that cites the record it amends.
+   */
+  app.get('/api/clinical-addenda', ...guard('consultations.view'), async (req, res) => {
+    const query = z
+      .strictObject({
+        entityType: z.enum(['consultation', 'prescription', 'patient']).optional(),
+        entityId: z.uuid().optional(),
+        patientId: z.uuid().optional(),
+      })
+      .parse(req.query);
+    const where: string[] = [];
+    const values: string[] = [];
+    if (query.entityType) {
+      where.push('a.entity_type = ?');
+      values.push(query.entityType);
+    }
+    if (query.entityId) {
+      where.push('a.entity_id = ?');
+      values.push(query.entityId);
+    }
+    if (query.patientId) {
+      where.push('a.patient_id = ?');
+      values.push(query.patientId);
+    }
+    res.json({
+      addenda: await db.all(
+        `SELECT a.*, u.full_name AS created_by_name FROM clinical_addenda a
+         LEFT JOIN users u ON u.id = a.created_by
+         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+         ORDER BY a.created_at DESC, a.id DESC LIMIT 200`,
+        values,
+      ),
+    });
+  });
+  app.post('/api/clinical-addenda', ...guard('consultations.amend'), async (req, res) => {
+    const input = clinicalAddendumSchema.parse(req.body);
+    res.status(201).json(
+      await db.transaction(async (tx) => {
+        await assertPermission(tx, req.auth!, 'consultations.amend');
+        await professional(tx, req);
+        // The amended record must exist; an addendum that points nowhere is a data error.
+        if (input.entityType === 'patient') {
+          await patient(tx, input.entityId);
+        } else if (input.entityType === 'consultation') {
+          const found = await tx.all('SELECT id FROM consultations WHERE id=?', [input.entityId]);
+          if (!found.length) fail('RECORD_NOT_FOUND', 'The consultation was not found.', 404);
+        } else {
+          await prescription(tx, input.entityId);
+        }
+        const patientId =
+          input.entityType === 'patient'
+            ? input.entityId
+            : input.entityType === 'prescription'
+              ? (await prescription(tx, input.entityId)).patientId
+              : ((
+                  await tx.all<{ patient_id: string }>(
+                    'SELECT patient_id FROM consultations WHERE id=?',
+                    [input.entityId],
+                  )
+                )[0]?.patient_id ?? null);
+        const id = crypto.randomUUID();
+        const createdAt = new Date().toISOString();
+        await tx.run(
+          'INSERT INTO clinical_addenda (id,entity_type,entity_id,patient_id,body,reason,created_by,device_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+          [
+            id,
+            input.entityType,
+            input.entityId,
+            patientId,
+            input.body,
+            input.reason,
+            req.auth!.user.id,
+            req.auth!.deviceId,
+            createdAt,
+          ],
+        );
+        await event(tx, req, 'addendum_recorded', input.entityId, { entityType: input.entityType });
+        return {
+          ...input,
+          id,
+          patientId,
+          createdBy: req.auth!.user.id,
+          createdByName: req.auth!.user.fullName,
+          createdAt,
+        };
+      }),
+    );
+  });
+  /**
+   * A printable record of every unit dispensed against a prescription, with the exact batch and the
+   * movement that proves it. This is the audit trail a pharmacy is asked for.
+   */
+  app.get(
+    '/api/prescriptions/:id/dispensing-record',
+    ...guard('prescriptions.view'),
+    async (req, res) => {
+      const rxId = idOf(req);
+      res.json(
+        await read(
+          req,
+          'prescriptions.view',
+          'dispensing_record_viewed',
+          async (tx) => {
+            const rx = await prescription(tx, rxId);
+            const rows = await tx.all<{
+              dispensed_at: string;
+              dispensed_by_name: string | null;
+              batch_number: string | null;
+              expiry_date: string | null;
+              quantity: number;
+              product_name: string;
+              movement_id: string;
+            }>(
+              `SELECT d.dispensed_at, u.full_name AS dispensed_by_name, b.batch_number, b.expiry_date,
+                 a.quantity, p.name AS product_name, a.movement_id
+               FROM prescription_dispensing d
+               JOIN prescription_dispensing_allocations a ON a.dispensing_id = d.id
+               JOIN prescription_items i ON i.id = a.item_id
+               JOIN products p ON p.id = i.product_id
+               LEFT JOIN product_batches b ON b.id = (SELECT batch_id FROM stock_movements WHERE id = a.movement_id)
+               LEFT JOIN users u ON u.id = d.dispensed_by
+               WHERE d.prescription_id = ?
+               ORDER BY d.dispensed_at ASC, a.id ASC`,
+              [rxId],
+            );
+            return {
+              prescription: {
+                id: rx.id,
+                status: rx.status,
+                prescribedAt: rx.prescribedAt,
+                prescriberName: rx.prescriberName,
+                items: rx.items.map((item) => ({
+                  id: item.id,
+                  medicineName: item.medicineName,
+                  strength: item.strength,
+                  quantity: item.quantity,
+                  dispensed: item.dispensed,
+                })),
+              },
+              patient: await patient(tx, rx.patientId),
+              lines: rows.map((row) => ({
+                dispensedAt: row.dispensed_at,
+                dispensedByName: row.dispensed_by_name,
+                medicineName: row.product_name,
+                batchNumber: row.batch_number,
+                expiryDate: row.expiry_date,
+                quantity: Number(row.quantity),
+                movementId: row.movement_id,
+              })),
+            };
+          },
+          rxId,
+        ),
+      );
+    },
+  );
   app.get('/api/patients/:id', ...guard('patients.view'), async (req, res) => {
     const id = idOf(req);
     res.json(

@@ -16,6 +16,53 @@ export const productTypeLabels: Record<ProductType, string> = {
   snacks: 'Snacks',
   general: 'General merchandise',
 };
+/**
+ * Dosage forms are a closed list so a pharmacy can filter and group reliably. `other` exists for
+ * compounded or unusual preparations rather than forcing a wrong choice.
+ */
+export const dosageForms = [
+  'tablet',
+  'capsule',
+  'syrup',
+  'suspension',
+  'solution',
+  'injection',
+  'infusion',
+  'cream',
+  'ointment',
+  'gel',
+  'drops',
+  'inhaler',
+  'suppository',
+  'powder',
+  'sachet',
+  'patch',
+  'spray',
+  'lozenge',
+  'other',
+] as const;
+export type DosageForm = (typeof dosageForms)[number];
+export const dosageFormLabels: Record<DosageForm, string> = {
+  tablet: 'Tablet',
+  capsule: 'Capsule',
+  syrup: 'Syrup',
+  suspension: 'Suspension',
+  solution: 'Solution',
+  injection: 'Injection',
+  infusion: 'Infusion',
+  cream: 'Cream',
+  ointment: 'Ointment',
+  gel: 'Gel',
+  drops: 'Drops',
+  inhaler: 'Inhaler',
+  suppository: 'Suppository',
+  powder: 'Powder',
+  sachet: 'Sachet',
+  patch: 'Patch',
+  spray: 'Spray',
+  lozenge: 'Lozenge',
+  other: 'Other preparation',
+};
 export const productStatuses = ['active', 'inactive'] as const;
 export type ProductStatus = (typeof productStatuses)[number];
 export const supplierStatuses = ['active', 'inactive'] as const;
@@ -131,6 +178,16 @@ export const productInputSchema = z
     categoryId: optionalUuid,
     description: optionalText(2000),
     manufacturer: optionalText(160),
+    /** Pharmacy identity. Free text would make "500 mg" unfilterable. */
+    dosageForm: z
+      .union([z.enum(dosageForms), z.literal(''), z.null()])
+      .optional()
+      .transform((value) => (value ? value : null)),
+    strength: optionalText(60),
+    packSize: z
+      .union([z.number().int().min(1).max(1_000_000), z.literal(''), z.null()])
+      .optional()
+      .transform((value) => (value === '' || value === null ? null : (value ?? null))),
     purchaseCostKobo: moneyKobo,
     sellingPriceKobo: moneyKobo,
     reorderLevel: nonNegativeQuantitySchema,
@@ -162,14 +219,23 @@ export const productListQuerySchema = z
     status: z.enum(productStatuses).optional(),
     categoryId: uuidSchema.optional(),
     stock: z.enum(['low', 'out', 'in']).optional(),
+    dosageForm: z.enum(dosageForms).optional(),
+    /**
+     * Expiry status is derived from the batch table, never from a cached column, so it cannot drift:
+     * `expired` has at least one batch already past its date, `expiring` has stock inside the alert
+     * window, `valid` has none of either.
+     */
+    expiry: z.enum(['expired', 'expiring', 'valid']).optional(),
     sort: z
       .enum([
         'name',
         'createdAt',
+        'updatedAt',
         'sellingPriceKobo',
         'purchaseCostKobo',
         'stockQuantity',
         'reorderLevel',
+        'nearestExpiryDate',
       ])
       .default('createdAt'),
     order: z.enum(['asc', 'desc']).default('desc'),
@@ -355,6 +421,10 @@ export type ProductSummary = {
   sku: string | null;
   barcode: string | null;
   productType: ProductType;
+  /** Pharmacy identity; null for products where the field does not apply. */
+  dosageForm: DosageForm | null;
+  strength: string | null;
+  packSize: number | null;
   categoryId: string | null;
   categoryName: string | null;
   purchaseCostKobo: number;
@@ -505,4 +575,140 @@ export type FefoAllocation = {
     expiryDate: string | null;
     quantity: number;
   }>;
+};
+
+// --- Bulk catalogue import ---------------------------------------------------
+/**
+ * Import is deliberately staged: the same request evaluates every row, reports what would happen,
+ * and only a non-preview request writes. Rows are matched on SKU, then barcode, then the exact
+ * name plus strength, so re-importing a corrected spreadsheet updates instead of duplicating.
+ */
+export const productImportRowSchema = z.object({
+  /**
+   * Structural limits only. Semantic validation (length, known vocabulary, prices) happens in the
+   * importer so one bad row is *reported* with its row number instead of rejecting the whole sheet
+   * with a field error the shopkeeper cannot map back to a line in their spreadsheet.
+   */
+  name: z.string().max(400).default(''),
+  genericName: z.string().trim().max(160).optional(),
+  brand: z.string().trim().max(120).optional(),
+  sku: z.string().trim().max(64).optional(),
+  barcode: z.string().trim().max(64).optional(),
+  productType: z.string().trim().max(40).optional(),
+  category: z.string().trim().max(120).optional(),
+  dosageForm: z.string().trim().max(40).optional(),
+  strength: z.string().trim().max(60).optional(),
+  packSize: z.string().trim().max(12).optional(),
+  manufacturer: z.string().trim().max(160).optional(),
+  purchaseCostKobo: z.string().trim().max(20).optional(),
+  sellingPriceKobo: z.string().trim().max(20).optional(),
+  reorderLevel: z.string().trim().max(12).optional(),
+  baseUnit: z.string().trim().max(40).optional(),
+  /** `yes`/`no`; defaults to yes for medicines. */
+  expiryTracked: z.string().trim().max(8).optional(),
+  status: z.string().trim().max(12).optional(),
+});
+export type ProductImportRowInput = z.infer<typeof productImportRowSchema>;
+
+export const productImportRequestSchema = z.strictObject({
+  rows: z.array(productImportRowSchema).min(1).max(5000),
+  /** When true nothing is written; the caller gets the same report. */
+  preview: z.boolean().default(true),
+  /** Repeat submissions of the same key return the original run. */
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
+  fileName: z.string().trim().max(160).optional(),
+  /** Update rows that match an existing product instead of skipping them. */
+  updateExisting: z.boolean().default(false),
+});
+
+export type ProductImportIssue = {
+  row: number;
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+};
+export type ProductImportRowResult = {
+  row: number;
+  name: string;
+  action: 'create' | 'update' | 'skip' | 'error';
+  productId: string | null;
+  matchedOn: 'sku' | 'barcode' | 'name' | null;
+  messages: string[];
+};
+export type ProductImportReport = {
+  id: string | null;
+  preview: boolean;
+  totalRows: number;
+  createCount: number;
+  updateCount: number;
+  skipCount: number;
+  errorCount: number;
+  issues: ProductImportIssue[];
+  rows: ProductImportRowResult[];
+  /** True when nothing was written because the run contained errors. */
+  blocked: boolean;
+  createdAt: string | null;
+};
+
+/**
+ * A stored import run, as returned by the history endpoint. Field names mirror the API response
+ * exactly; the wizard previously guessed them and silently rendered blank cells.
+ */
+export type ProductImportRun = {
+  id: string;
+  fileName: string | null;
+  totalRows: number;
+  createdRows: number;
+  updatedRows: number;
+  skippedRows: number;
+  dryRun: boolean;
+  status: string;
+  createdAt: string;
+  createdByName: string | null;
+};
+
+/** The column headers the parser accepts, in the order it suggests them. */
+export const productImportColumns = [
+  'name',
+  'genericName',
+  'brand',
+  'sku',
+  'barcode',
+  'productType',
+  'category',
+  'dosageForm',
+  'strength',
+  'packSize',
+  'manufacturer',
+  'purchaseCostKobo',
+  'sellingPriceKobo',
+  'reorderLevel',
+  'baseUnit',
+  'expiryTracked',
+  'status',
+] as const;
+export const productImportTemplate = [
+  'name,genericName,brand,sku,barcode,productType,category,dosageForm,strength,packSize,manufacturer,purchaseCostKobo,sellingPriceKobo,reorderLevel,baseUnit,expiryTracked,status',
+  'Paracetamol 500 mg Tablet,Paracetamol,Emzor,PCM-500-EMZ,6151100010019,medicine,Analgesics,tablet,500 mg,10,Emzor,50.00,100.00,20,tablet,yes,active',
+  'Amoxicillin 250 mg Capsule,Amoxicillin,,AMX-250,,medicine,Antibiotics,capsule,250 mg,10,,120.00,220.00,15,capsule,yes,active',
+].join('\n');
+
+// --- Clinical addenda --------------------------------------------------------
+/**
+ * A saved clinical note is never rewritten. A correction is a separate, attributed, dated entry
+ * that cites the record it amends, mirroring the append-only discipline of the stock ledger.
+ */
+export const clinicalAddendumSchema = z.strictObject({
+  entityType: z.enum(['consultation', 'prescription', 'patient']),
+  entityId: uuidSchema,
+  body: z.string().trim().min(3, 'Describe the correction.').max(4000),
+  reason: z.string().trim().min(3, 'State why the record is being amended.').max(500),
+});
+export type ClinicalAddendumInput = z.infer<typeof clinicalAddendumSchema>;
+export type ClinicalAddendum = ClinicalAddendumInput & {
+  id: string;
+  patientId: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
 };

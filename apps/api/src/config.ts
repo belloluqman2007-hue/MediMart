@@ -25,6 +25,12 @@ const envSchema = z.object({
    * reach the central computer without internet or a purchased certificate.
    */
   MEDIMART_ALLOW_LAN_HTTP: z.enum(['true', 'false']).default('false'),
+  /**
+   * Development-only convenience for manual acceptance testing: raises the general and
+   * authentication rate limits so a tester walking through many screens is not locked out of their
+   * own shop for fifteen minutes. It is refused in production and changes no other rule.
+   */
+  MEDIMART_TEST_LIMITS: z.enum(['true', 'false']).default('false'),
 });
 export interface ApiConfig {
   environment: 'development' | 'test' | 'production';
@@ -87,6 +93,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         'Production allowed origins must use HTTPS. Set MEDIMART_MANAGED_DESKTOP=true only for the packaged desktop application.',
       );
   }
+  const testLimits = value.MEDIMART_TEST_LIMITS === 'true';
+  if (testLimits && value.NODE_ENV === 'production')
+    throw new Error('MEDIMART_TEST_LIMITS is a development-only testing aid.');
   return {
     environment: value.NODE_ENV,
     host: value.API_HOST,
@@ -101,5 +110,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     managedDesktop,
     desktopOrigins,
     allowLanHttp,
+    ...(testLimits ? { authRateLimit: 500, apiRateLimit: 20_000 } : {}),
   };
 }

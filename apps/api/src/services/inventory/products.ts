@@ -10,6 +10,7 @@ import type { AuthContext } from '../auth';
 import { ApiError } from '../../errors';
 import { audit } from '../audit';
 import {
+  addDays,
   assertPermission,
   likePattern,
   loadProduct,
@@ -18,6 +19,7 @@ import {
   movementSelect,
   paginate,
   productSelect,
+  todayIso,
   type MovementRow,
   type ProductRow,
 } from './common';
@@ -29,6 +31,8 @@ type ListQuery = {
   status?: string;
   categoryId?: string;
   stock?: 'low' | 'out' | 'in';
+  dosageForm?: string;
+  expiry?: 'expired' | 'expiring' | 'valid';
   sort: string;
   order: 'asc' | 'desc';
   page: number;
@@ -38,10 +42,13 @@ type ListQuery = {
 const sortColumns: Record<string, string> = {
   name: 'p.name',
   createdAt: 'p.created_at',
+  updatedAt: 'p.updated_at',
   sellingPriceKobo: 'p.selling_price_kobo',
   purchaseCostKobo: 'p.purchase_cost_kobo',
   stockQuantity: 'COALESCE(b.quantity, 0)',
   reorderLevel: 'p.reorder_level',
+  nearestExpiryDate:
+    '(SELECT MIN(pb.expiry_date) FROM product_batches pb WHERE pb.product_id=p.id AND pb.quantity_remaining>0 AND pb.expiry_date IS NOT NULL)',
 };
 
 export async function categorySubtreeIds(tx: SqlExecutor, categoryId: string) {
@@ -71,11 +78,13 @@ export async function listProducts(
   const where: string[] = ['p.deleted_at IS NULL'];
   const values: Array<string | number> = [];
   if (query.search) {
-    where.push(
-      "(p.name LIKE ? ESCAPE '\\' OR p.generic_name LIKE ? ESCAPE '\\' OR p.brand LIKE ? ESCAPE '\\' OR p.sku LIKE ? ESCAPE '\\' OR p.barcode LIKE ? ESCAPE '\\' OR p.manufacturer LIKE ? ESCAPE '\\')",
-    );
-    const pattern = likePattern(query.search);
-    values.push(pattern, pattern, pattern, pattern, pattern, pattern);
+    /**
+     * `search_text` is one normalised column covering name, generic name, brand, SKU, barcode,
+     * manufacturer, dosage form and strength. It replaced six ORed LIKE terms: the same result for
+     * the shopkeeper, far less work per row on a large catalogue.
+     */
+    where.push("p.search_text LIKE ? ESCAPE '\\'");
+    values.push(likePattern(query.search.toLowerCase()));
   }
   if (query.type) {
     where.push('p.product_type = ?');
@@ -90,12 +99,35 @@ export async function listProducts(
     where.push(`p.category_id IN (${ids.map(() => '?').join(',')})`);
     values.push(...ids);
   }
+  if (query.dosageForm) {
+    where.push('p.dosage_form = ?');
+    values.push(query.dosageForm);
+  }
   if (query.stock === 'out') where.push('COALESCE(b.quantity, 0) = 0');
   if (query.stock === 'in') where.push('COALESCE(b.quantity, 0) > 0');
   if (query.stock === 'low')
     where.push(
       'p.reorder_level > 0 AND COALESCE(b.quantity, 0) > 0 AND COALESCE(b.quantity, 0) <= p.reorder_level',
     );
+  if (query.expiry) {
+    // Derived from the batch table every time; never from a cached column that could go stale.
+    const today = todayIso();
+    const alertCutoff = addDays(today, await expiryAlertDays(db));
+    const expiredBatches =
+      'EXISTS (SELECT 1 FROM product_batches pb WHERE pb.product_id=p.id AND pb.quantity_remaining>0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date < ?)';
+    const expiringBatches =
+      'EXISTS (SELECT 1 FROM product_batches pb WHERE pb.product_id=p.id AND pb.quantity_remaining>0 AND pb.expiry_date IS NOT NULL AND pb.expiry_date >= ? AND pb.expiry_date <= ?)';
+    if (query.expiry === 'expired') {
+      where.push(expiredBatches);
+      values.push(today);
+    } else if (query.expiry === 'expiring') {
+      where.push(expiringBatches);
+      values.push(today, alertCutoff);
+    } else {
+      where.push(`NOT ${expiredBatches} AND NOT ${expiringBatches}`);
+      values.push(today, today, alertCutoff);
+    }
+  }
   const clause = `WHERE ${where.join(' AND ')}`;
   const total = (
     await db.all<{ count: number }>(
@@ -238,8 +270,66 @@ async function replaceUnits(tx: SqlExecutor, productId: string, input: ProductIn
     ]);
 }
 
-const productColumns = `name,generic_name,brand,sku,barcode,product_type,category_id,description,manufacturer,
-  purchase_cost_kobo,selling_price_kobo,reorder_level,base_unit_id,is_expiry_tracked,status`;
+/**
+ * The normalised text the catalogue search reads. Kept in one place so an insert, an update and the
+ * Phase 8 backfill can never disagree about what is searchable.
+ */
+export function productSearchText(input: {
+  name: string;
+  genericName?: string | null;
+  brand?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  manufacturer?: string | null;
+  dosageForm?: string | null;
+  strength?: string | null;
+}) {
+  return [
+    input.name,
+    input.genericName,
+    input.brand,
+    input.sku,
+    input.barcode,
+    input.manufacturer,
+    input.dosageForm,
+    input.strength,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+const productColumnList = [
+  'name',
+  'generic_name',
+  'brand',
+  'sku',
+  'barcode',
+  'product_type',
+  'category_id',
+  'description',
+  'manufacturer',
+  'dosage_form',
+  'strength',
+  'pack_size',
+  'purchase_cost_kobo',
+  'selling_price_kobo',
+  'reorder_level',
+  'base_unit_id',
+  'is_expiry_tracked',
+  'status',
+  'search_text',
+] as const;
+const productColumns = productColumnList.join(',');
+/**
+ * id + every business column + the five audit columns (created_by, updated_by, device_id,
+ * created_at, updated_at). Derived from the column list so adding a product column cannot silently
+ * desynchronise the statement from its values.
+ */
+const productInsertPlaceholders = Array.from(
+  { length: productColumnList.length + 6 },
+  () => '?',
+).join(',');
 
 export async function createProduct(
   db: Database,
@@ -247,8 +337,29 @@ export async function createProduct(
   requestId: string,
   input: ProductInput,
 ) {
-  return db.transaction(async (tx) => {
-    await assertPermission(tx, auth, 'products.create');
+  return db.transaction(async (tx) =>
+    createProductIn(tx, auth, requestId, input, { recheckPermission: true }),
+  );
+}
+
+/**
+ * Insert one product inside a transaction the caller already owns.
+ *
+ * Used by the API (which owns a fresh transaction) and by the bulk importer (which owns one
+ * transaction for the whole run). `recheckPermission` is false for the importer because the run
+ * revalidated the live session and `products.import` grant once at its start; every other rule —
+ * below-cost authorization, reference validation, uniqueness, audit — still applies per row.
+ */
+export async function createProductIn(
+  db: SqlExecutor,
+  auth: AuthContext,
+  requestId: string,
+  input: ProductInput,
+  options: { recheckPermission?: boolean } = {},
+) {
+  {
+    const tx = db;
+    if (options.recheckPermission !== false) await assertPermission(tx, auth, 'products.create');
     const belowCost = await belowCostDecision(tx, auth, input);
     await validateProductReferences(tx, input);
     await assertUniqueIdentifiers(tx, input);
@@ -256,7 +367,7 @@ export async function createProduct(
     const now = new Date().toISOString();
     await tx.run(
       `INSERT INTO products (id,${productColumns},created_by,updated_by,device_id,created_at,updated_at)
-      VALUES (${Array.from({ length: 21 }, () => '?').join(',')})`,
+      VALUES (${productInsertPlaceholders})`,
       [
         id,
         input.name,
@@ -268,12 +379,16 @@ export async function createProduct(
         input.categoryId,
         input.description ?? null,
         input.manufacturer ?? null,
+        input.dosageForm ?? null,
+        input.strength ?? null,
+        input.packSize ?? null,
         input.purchaseCostKobo,
         input.sellingPriceKobo,
         input.reorderLevel,
         input.baseUnitId,
         input.isExpiryTracked ? 1 : 0,
         input.status,
+        productSearchText(input),
         auth.user.id,
         auth.user.id,
         auth.deviceId,
@@ -302,7 +417,7 @@ export async function createProduct(
         metadata: belowCost,
       });
     return getProductDetail(tx, id);
-  });
+  }
 }
 
 export async function updateProduct(
@@ -312,8 +427,23 @@ export async function updateProduct(
   id: string,
   input: ProductInput,
 ) {
-  return db.transaction(async (tx) => {
-    await assertPermission(tx, auth, 'products.edit');
+  return db.transaction(async (tx) =>
+    updateProductIn(tx, auth, requestId, id, input, { recheckPermission: true }),
+  );
+}
+
+/** Update one product inside a transaction the caller already owns. See `createProductIn`. */
+export async function updateProductIn(
+  db: SqlExecutor,
+  auth: AuthContext,
+  requestId: string,
+  id: string,
+  input: ProductInput,
+  options: { recheckPermission?: boolean } = {},
+) {
+  {
+    const tx = db;
+    if (options.recheckPermission !== false) await assertPermission(tx, auth, 'products.edit');
     const existing = await loadProduct(tx, id);
     const belowCost = await belowCostDecision(tx, auth, input);
     await validateProductReferences(tx, input);
@@ -333,8 +463,9 @@ export async function updateProduct(
     const now = new Date().toISOString();
     await tx.run(
       `UPDATE products SET name=?,generic_name=?,brand=?,sku=?,barcode=?,product_type=?,category_id=?,
-        description=?,manufacturer=?,purchase_cost_kobo=?,selling_price_kobo=?,reorder_level=?,
-        base_unit_id=?,is_expiry_tracked=?,status=?,updated_by=?,device_id=?,version=version+1,updated_at=?
+        description=?,manufacturer=?,dosage_form=?,strength=?,pack_size=?,purchase_cost_kobo=?,
+        selling_price_kobo=?,reorder_level=?,base_unit_id=?,is_expiry_tracked=?,status=?,
+        search_text=?,updated_by=?,device_id=?,version=version+1,updated_at=?
       WHERE id=? AND deleted_at IS NULL`,
       [
         input.name,
@@ -346,12 +477,16 @@ export async function updateProduct(
         input.categoryId,
         input.description ?? null,
         input.manufacturer ?? null,
+        input.dosageForm ?? null,
+        input.strength ?? null,
+        input.packSize ?? null,
         input.purchaseCostKobo,
         input.sellingPriceKobo,
         input.reorderLevel,
         input.baseUnitId,
         input.isExpiryTracked ? 1 : 0,
         input.status,
+        productSearchText(input),
         auth.user.id,
         auth.deviceId,
         now,
@@ -383,7 +518,7 @@ export async function updateProduct(
         },
       });
     return getProductDetail(tx, id);
-  });
+  }
 }
 
 export async function setProductStatus(
