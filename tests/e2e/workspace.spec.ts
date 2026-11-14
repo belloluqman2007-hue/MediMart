@@ -10,33 +10,71 @@ const staff = {
   email: 'browser-cashier@example.test',
   password: 'A unique cashier-test passphrase',
 };
+// The dashboard's page heading is a personalized greeting; "Dashboard" is the breadcrumb,
+// not a heading. Assert both so a login screen or public shell cannot pass as the workspace.
+async function expectDashboard(page: Page, firstName?: string) {
+  await expect(
+    page.locator('main#main-content').getByRole('heading', {
+      level: 1,
+      name: new RegExp(
+        `^Good (morning|afternoon|evening)${firstName ? `, ${firstName}` : '(?:, [^,]+)?'}$`,
+      ),
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole('banner').getByText('Dashboard', { exact: true })).toBeVisible();
+}
 async function signIn(page: Page, account = owner) {
   await page.goto('/#/login');
   await page.getByLabel('Email address', { exact: true }).fill(account.email);
   await page.getByLabel('Password', { exact: true }).fill(account.password);
   await page.getByRole('button', { name: 'Sign in to MediMart' }).click();
-  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await expectDashboard(page, account.fullName.split(' ')[0]);
 }
 test('controlled first-owner setup works from the UI', async ({ page }) => {
   await page.goto('/#/register');
   await page.getByLabel('Full name', { exact: true }).fill(owner.fullName);
   await page.getByLabel('Email address', { exact: true }).fill(owner.email);
   await page.getByLabel('Password', { exact: true }).fill(owner.password);
+  // A bad setup token must not create the owner or establish a session.
+  await page.getByLabel('Server setup token').fill('invalid-e2e-setup-token-000000000000000000000');
+  const [denied] = await Promise.all([
+    page.waitForResponse('**/api/auth/register-owner'),
+    page.getByRole('button', { name: 'Create owner account' }).click(),
+  ]);
+  expect(denied.status()).toBe(403);
+  await expect(page.getByRole('alert')).toContainText('A valid server setup token is required');
+  expect((await page.request.get('/api/auth/session')).status()).toBe(401);
+  expect((await (await page.request.get('/api/auth/bootstrap-status')).json()).required).toBe(true);
+
   await page.getByLabel('Server setup token').fill('e2e-only-not-a-real-credential-00000000000000');
-  await page.getByRole('button', { name: 'Create owner account' }).click();
-  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
-  await expect(page.getByText('Your account is ready', { exact: true })).toBeVisible();
+  const [created] = await Promise.all([
+    page.waitForResponse('**/api/auth/register-owner'),
+    page.getByRole('button', { name: 'Create owner account' }).click(),
+  ]);
+  expect(created.status()).toBe(201);
+  expect((await created.json()).user.roles).toContain('owner');
+  await expect(page.locator('.toast[role="status"]')).toContainText('Your owner account is ready');
+  await expectDashboard(page, 'Browser');
+  const session = await page.request.get('/api/auth/session');
+  expect(session.status()).toBe(200);
+  expect((await session.json()).user.email).toBe(owner.email);
+  expect((await (await page.request.get('/api/auth/bootstrap-status')).json()).required).toBe(
+    false,
+  );
   await page.reload();
-  await expect(page.getByText('Your account is ready', { exact: true })).toBeVisible();
+  await expectDashboard(page, 'Browser');
+  expect((await page.request.get('/api/auth/session')).status()).toBe(200);
 });
 test('dashboard is honest, responsive, and has all 22 navigation entries', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await expectDashboard(page);
   await expect(page.locator('.sidebar-nav a')).toHaveCount(22);
-  // The four figures the dashboard genuinely cannot yet read stay labelled, not invented.
-  await expect(page.getByText('Not available yet', { exact: true })).toHaveCount(4);
+  // A signed-out visitor sees four locked cards, never real business figures.
+  await expect(
+    page.getByRole('region', { name: 'Today at a glance' }).locator('.stat-card.is-locked'),
+  ).toHaveCount(4);
   for (const width of [1440, 1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     expect(
@@ -82,7 +120,7 @@ test('invalid credentials show a safe inline error, then a valid login succeeds'
   await expect(page.getByRole('alert')).toContainText('Unable to sign in');
   await page.getByLabel('Password', { exact: true }).fill(owner.password);
   await page.getByRole('button', { name: 'Sign in to MediMart' }).click();
-  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await expectDashboard(page);
 });
 test('settings persist and an owner can create a limited staff account', async ({ page }) => {
   await signIn(page);
@@ -112,7 +150,7 @@ test('an owner can add a product, receive a batch, and audit it in the stock led
   await page.getByRole('link', { name: 'Add product', exact: true }).click();
   await page.getByLabel('Product name', { exact: true }).fill('Browser Test Paracetamol');
   await page.getByLabel('Generic name').fill('Paracetamol');
-  await page.getByLabel('Barcode').fill('BR-E2E-0001');
+  await page.getByRole('textbox', { name: /^Barcode / }).fill('BR-E2E-0001');
   await page.getByRole('combobox', { name: /Base unit/ }).selectOption({ label: 'Tablet (tab)' });
   await page.getByLabel('Purchase cost (₦)').fill('50.00');
   await page.getByLabel('Selling price (₦)').fill('100.00');
@@ -218,7 +256,7 @@ test('public shell reopens offline without caching API responses or granting a s
     .toBe(true);
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await expectDashboard(page);
   await expect(page.getByText('Central server offline', { exact: true })).toBeVisible();
   const privateEntries = await page.evaluate(async () => {
     const names = await caches.keys();
@@ -265,7 +303,7 @@ test('individual password changes sign out the owner and accept the new credenti
   await page.getByRole('button', { name: 'Change password & sign out', exact: true }).click();
   await expect(page.getByText('Make this workspace yours', { exact: true })).toBeVisible();
   await signIn(page, { ...owner, password: newPassword });
-  await expect(page.getByText('Your account is ready', { exact: true })).toBeVisible();
+  await expectDashboard(page, 'Browser');
 });
 
 test('skip navigation and settings tabs work with a keyboard without changing the wrong route', async ({

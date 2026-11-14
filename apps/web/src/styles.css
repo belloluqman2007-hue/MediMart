@@ -6731,7 +6731,8 @@ textarea:focus-visible {
   border-color: var(--green-soft);
 }
 .stat-card.is-locked {
-  opacity: 0.7;
+  /* Keep locked figures visibly distinct without fading text below WCAG contrast. */
+  border-style: dashed;
 }
 .stat-top {
   display: flex;
